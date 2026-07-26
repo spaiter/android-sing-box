@@ -248,9 +248,12 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 		if protocol != "" {
 			udpTimeout = C.ProtocolTimeouts[protocol]
 		}
+		if udpTimeout == 0 {
+			udpTimeout = C.UDPTimeout
+		}
 	}
 	if udpTimeout > 0 {
-		ctx, conn = canceler.NewPacketConn(ctx, conn, udpTimeout)
+		ctx, conn = newActiveTimeoutPacketConn(ctx, conn, udpTimeout)
 	}
 	destination := bufio.NewPacketConn(remotePacketConn)
 	var done atomic.Bool
@@ -258,8 +261,50 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 	go m.packetConnectionCopy(ctx, destination, conn, true, &done, onClose)
 }
 
+func newActiveTimeoutPacketConn(ctx context.Context, conn N.PacketConn, timeout time.Duration) (context.Context, N.PacketConn) {
+	if timeoutConn, isTimeoutConn := common.Cast[canceler.PacketConn](conn); isTimeoutConn {
+		switch timeoutConn.(type) {
+		case *canceler.TimerPacketConn, *canceler.TimeoutPacketConn:
+			oldTimeout := timeoutConn.Timeout()
+			if oldTimeout > 0 && timeout >= oldTimeout {
+				return ctx, conn
+			}
+			if timeoutConn.SetTimeout(timeout) {
+				return ctx, conn
+			}
+		}
+	}
+	if conn.SetReadDeadline(time.Time{}) == nil {
+		return canceler.NewTimeoutPacketConn(ctx, conn, timeout)
+	}
+	return canceler.NewPacketConn(ctx, conn, timeout)
+}
+
+// isNormalConnectionClose checks whether a relay copy error is an expected
+// close signal after the connection has already made progress.
+func isNormalConnectionClose(err error, transferred int64) bool {
+	if err == nil {
+		return false
+	}
+	if E.IsClosedOrCanceled(err) {
+		return true
+	}
+	if transferred > 0 && E.IsMulti(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	errMsg := err.Error()
+	// HTTP/2 and HTTP/3 normal close patterns
+	// NO_ERROR: explicit normal close (RFC 7540)
+	// response body closed: normal completion of HTTP/2 response
+	// INTERNAL_ERROR; received from peer: server-side stream cleanup (common with xhttp/Xray-core)
+	return strings.Contains(errMsg, "NO_ERROR") ||
+		strings.Contains(errMsg, "http2: response body closed") ||
+		strings.Contains(errMsg, "http2: client connection force closed via ClientConn.Close") ||
+		strings.Contains(errMsg, "INTERNAL_ERROR; received from peer")
+}
+
 func (m *ConnectionManager) connectionCopy(ctx context.Context, source net.Conn, destination net.Conn, direction bool, done *atomic.Bool, onClose N.CloseHandlerFunc) {
-	_, err := bufio.CopyWithIncreateBuffer(destination, source, bufio.DefaultIncreaseBufferAfter, bufio.DefaultBatchSize)
+	transferred, err := bufio.CopyWithIncreateBuffer(destination, source, bufio.DefaultIncreaseBufferAfter, bufio.DefaultBatchSize)
 	if err != nil {
 		common.Close(source, destination)
 	} else if duplexDst, isDuplex := destination.(N.WriteCloser); isDuplex {
@@ -279,7 +324,7 @@ func (m *ConnectionManager) connectionCopy(ctx context.Context, source net.Conn,
 	if !direction {
 		if err == nil {
 			m.logger.DebugContext(ctx, "connection upload finished")
-		} else if !E.IsClosedOrCanceled(err) {
+		} else if !isNormalConnectionClose(err, transferred) {
 			m.logger.ErrorContext(ctx, "connection upload closed: ", err)
 		} else {
 			m.logger.TraceContext(ctx, "connection upload closed")
@@ -287,7 +332,7 @@ func (m *ConnectionManager) connectionCopy(ctx context.Context, source net.Conn,
 	} else {
 		if err == nil {
 			m.logger.DebugContext(ctx, "connection download finished")
-		} else if !E.IsClosedOrCanceled(err) {
+		} else if !isNormalConnectionClose(err, transferred) {
 			m.logger.ErrorContext(ctx, "connection download closed: ", err)
 		} else {
 			m.logger.TraceContext(ctx, "connection download closed")

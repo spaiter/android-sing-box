@@ -62,7 +62,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		}
 	}
 	if options.Transport != nil {
-		outbound.transport, err = v2ray.NewClientTransport(ctx, outbound.dialer, outbound.serverAddr, common.PtrValueOrDefault(options.Transport), outbound.tlsConfig)
+		outbound.transport, err = v2ray.NewClientTransport(ctx, logger, outbound.dialer, outbound.serverAddr, common.PtrValueOrDefault(options.Transport), outbound.tlsConfig)
 		if err != nil {
 			return nil, E.Cause(err, "create client transport: ", options.Transport.Type)
 		}
@@ -107,7 +107,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 
 func (h *Outbound) InterfaceUpdated() {
 	if h.transport != nil {
-		h.transport.Close()
+		if err := adapter.ResetV2RayClientTransport(h.transport); err != nil {
+			h.logger.Warn(err)
+		}
 	}
 	if h.multiplexDialer != nil {
 		h.multiplexDialer.Reset()

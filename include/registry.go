@@ -3,7 +3,7 @@ package include
 import (
 	"context"
 
-	"github.com/sagernet/sing-box"
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
@@ -20,13 +20,18 @@ import (
 	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/block"
 	"github.com/sagernet/sing-box/protocol/direct"
+	"github.com/sagernet/sing-box/protocol/fragmentexclave"
 	"github.com/sagernet/sing-box/protocol/group"
 	"github.com/sagernet/sing-box/protocol/http"
+	"github.com/sagernet/sing-box/protocol/masque"
+	"github.com/sagernet/sing-box/protocol/mieru"
 	"github.com/sagernet/sing-box/protocol/mixed"
 	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/redirect"
 	"github.com/sagernet/sing-box/protocol/shadowsocks"
+	"github.com/sagernet/sing-box/protocol/shadowsocksr"
 	"github.com/sagernet/sing-box/protocol/shadowtls"
+	snellprotocol "github.com/sagernet/sing-box/protocol/snell"
 	"github.com/sagernet/sing-box/protocol/socks"
 	"github.com/sagernet/sing-box/protocol/ssh"
 	"github.com/sagernet/sing-box/protocol/tor"
@@ -62,6 +67,8 @@ func InboundRegistry() *inbound.Registry {
 	shadowtls.RegisterInbound(registry)
 	vless.RegisterInbound(registry)
 	anytls.RegisterInbound(registry)
+	mieru.RegisterInbound(registry)
+	snellprotocol.RegisterInbound(registry)
 
 	registerQUICInbounds(registry)
 	registerStubForRemovedInbounds(registry)
@@ -73,6 +80,7 @@ func OutboundRegistry() *outbound.Registry {
 	registry := outbound.NewRegistry()
 
 	direct.RegisterOutbound(registry)
+	fragmentexclave.RegisterOutbound(registry)
 
 	block.RegisterOutbound(registry)
 
@@ -89,9 +97,13 @@ func OutboundRegistry() *outbound.Registry {
 	ssh.RegisterOutbound(registry)
 	shadowtls.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
+	mieru.RegisterOutbound(registry)
 	anytls.RegisterOutbound(registry)
+	snellprotocol.RegisterOutbound(registry)
+	masque.RegisterOutbound(registry)
 
 	registerQUICOutbounds(registry)
+	registerAwgOutbound(registry)
 	registerStubForRemovedOutbounds(registry)
 
 	return registry
@@ -101,6 +113,7 @@ func EndpointRegistry() *endpoint.Registry {
 	registry := endpoint.NewRegistry()
 
 	registerWireGuardEndpoint(registry)
+	registerAwgEndpoint(registry)
 	registerTailscaleEndpoint(registry)
 
 	return registry
@@ -111,6 +124,7 @@ func DNSTransportRegistry() *dns.TransportRegistry {
 
 	transport.RegisterTCP(registry)
 	transport.RegisterUDP(registry)
+	transport.RegisterBalancer(registry)
 	transport.RegisterTLS(registry)
 	transport.RegisterHTTPS(registry)
 	hosts.RegisterTransport(registry)
@@ -146,9 +160,7 @@ func registerStubForRemovedInbounds(registry *inbound.Registry) {
 }
 
 func registerStubForRemovedOutbounds(registry *outbound.Registry) {
-	outbound.Register[option.ShadowsocksROutboundOptions](registry, C.TypeShadowsocksR, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksROutboundOptions) (adapter.Outbound, error) {
-		return nil, E.New("ShadowsocksR is deprecated and removed in sing-box 1.6.0")
-	})
+	shadowsocksr.RegisterOutbound(registry)
 	outbound.Register[option.StubOptions](registry, C.TypeWireGuard, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.StubOptions) (adapter.Outbound, error) {
 		return nil, E.New("WireGuard outbound is deprecated in sing-box 1.11.0 and removed in sing-box 1.13.0, use WireGuard endpoint instead")
 	})

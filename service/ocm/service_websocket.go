@@ -3,7 +3,7 @@ package ocm
 import (
 	"context"
 	stdTLS "crypto/tls"
-	"encoding/json"
+	"github.com/goccy/go-json"
 	"io"
 	"net"
 	"net/http"

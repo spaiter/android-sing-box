@@ -96,7 +96,7 @@ func fetch(args []string) error {
 	return nil
 }
 
-func fetchHTTP(httpClient *http.Client, parsedURL *url.URL) error {
+func fetchHTTP(httpClient *http.Client, parsedURL *url.URL) (err error) {
 	request, err := http.NewRequest("GET", parsedURL.String(), nil)
 	if err != nil {
 		return err
@@ -106,7 +106,13 @@ func fetchHTTP(httpClient *http.Client, parsedURL *url.URL) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		_, copyErr := io.Copy(io.Discard, response.Body)
+		closeErr := response.Body.Close()
+		if err == nil {
+			err = errors.Join(copyErr, closeErr)
+		}
+	}()
 	_, err = bufio.Copy(os.Stdout, response.Body)
 	if errors.Is(err, io.EOF) {
 		return nil

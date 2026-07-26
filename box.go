@@ -20,6 +20,8 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/experimental"
+	experimentalAdblock "github.com/sagernet/sing-box/experimental/adblock"
+	adblockRegexpr "github.com/sagernet/sing-box/experimental/adblock/regexpr"
 	"github.com/sagernet/sing-box/experimental/cachefile"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -131,6 +133,7 @@ func New(options Options) (*Box, error) {
 	var needCacheFile bool
 	var needClashAPI bool
 	var needV2RayAPI bool
+	var needAdblock bool
 	if experimentalOptions.CacheFile != nil && experimentalOptions.CacheFile.Enabled || options.PlatformLogWriter != nil {
 		needCacheFile = true
 	}
@@ -139,6 +142,9 @@ func New(options Options) (*Box, error) {
 	}
 	if experimentalOptions.V2RayAPI != nil && experimentalOptions.V2RayAPI.Listen != "" {
 		needV2RayAPI = true
+	}
+	if experimentalOptions.Adblock != nil && experimentalOptions.Adblock.Enabled && experimentalOptions.Adblock.HasFilters() {
+		needAdblock = true
 	}
 	platformInterface := service.FromContext[adapter.PlatformInterface](ctx)
 	var defaultLogWriter io.Writer
@@ -173,6 +179,9 @@ func New(options Options) (*Box, error) {
 
 	routeOptions := common.PtrValueOrDefault(options.Route)
 	dnsOptions := common.PtrValueOrDefault(options.DNS)
+	if needAdblock && experimentalOptions.Adblock.Constraints.HasProcessRules() {
+		routeOptions.FindProcess = true
+	}
 	endpointManager := endpoint.NewManager(logFactory.NewLogger("endpoint"), endpointRegistry)
 	inboundManager := inbound.NewManager(logFactory.NewLogger("inbound"), inboundRegistry, endpointManager)
 	outboundManager := outbound.NewManager(logFactory.NewLogger("outbound"), outboundRegistry, endpointManager, routeOptions.Final)
@@ -183,6 +192,16 @@ func New(options Options) (*Box, error) {
 	service.MustRegister[adapter.OutboundManager](ctx, outboundManager)
 	service.MustRegister[adapter.DNSTransportManager](ctx, dnsTransportManager)
 	service.MustRegister[adapter.ServiceManager](ctx, serviceManager)
+	if needAdblock {
+		adblockService, err := experimentalAdblock.New(ctx, logFactory.NewLogger("adblock"), common.PtrValueOrDefault(experimentalOptions.Adblock), adblockRegexpr.CalculateLogLevels(logFactory.Level(), options.Log)...)
+		if err != nil {
+			return nil, E.Cause(err, "create adblock")
+		}
+		if adblockService != nil {
+			service.MustRegister[adapter.AdblockService](ctx, adblockService)
+			internalServices = append(internalServices, adblockService)
+		}
+	}
 	dnsRouter := dns.NewRouter(ctx, logFactory, dnsOptions)
 	service.MustRegister[adapter.DNSRouter](ctx, dnsRouter)
 	networkManager, err := route.NewNetworkManager(ctx, logFactory.NewLogger("network"), routeOptions, dnsOptions)

@@ -18,6 +18,6 @@ func NewGRPCServer(ctx context.Context, logger logger.ContextLogger, options opt
 	return v2raygrpclite.NewServer(ctx, logger, options, tlsConfig, handler)
 }
 
-func NewGRPCClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayGRPCOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
+func NewGRPCClient(ctx context.Context, _ logger.ContextLogger, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayGRPCOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
 	return v2raygrpclite.NewClient(ctx, dialer, serverAddr, options, tlsConfig), nil
 }

@@ -89,6 +89,7 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 	request = request.WithContext(ctx)
 	conn := newLateGunConn(pipeInWriter)
 	go func() {
+		//nolint:bodyclose // successful response bodies are used as the returned stream.
 		response, err := c.transport.RoundTrip(request)
 		if err != nil {
 			conn.setup(nil, err)

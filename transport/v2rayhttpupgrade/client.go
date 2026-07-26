@@ -91,6 +91,7 @@ func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 	bufReader := std_bufio.NewReader(conn)
+	//nolint:bodyclose // on 101 success the response owns the upgraded connection returned below.
 	response, err := http.ReadResponse(bufReader, request)
 	if err != nil {
 		conn.Close()

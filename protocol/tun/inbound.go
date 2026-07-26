@@ -17,7 +17,7 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/route/rule"
-	"github.com/sagernet/sing-tun"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json/badoption"
@@ -429,11 +429,33 @@ func (t *Inbound) updateRouteAddressSet(it adapter.RuleSet) {
 }
 
 func (t *Inbound) Close() error {
-	return common.Close(
-		t.tunStack,
-		t.tunIf,
-		t.autoRedirect,
-	)
+	if err := common.Close(t.autoRedirect); err != nil {
+		return err
+	}
+
+	tunIf := t.tunIf
+	t.tunIf = nil
+
+	stack := t.tunStack
+	t.tunStack = nil
+
+	var retErr error
+
+	if tunIf != nil {
+		if err := tunIf.Close(); err != nil {
+			retErr = err
+		}
+	}
+
+	if stack != nil {
+		forceCloseGVisorStack(stack)
+
+		if err := stack.Close(); err != nil {
+			retErr = err
+		}
+	}
+
+	return retErr
 }
 
 func (t *Inbound) PrepareConnection(network string, source M.Socksaddr, destination M.Socksaddr, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {

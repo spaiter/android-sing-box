@@ -2,7 +2,7 @@ package option
 
 import (
 	"crypto/tls"
-	"encoding/json"
+	"github.com/goccy/go-json"
 	"strings"
 
 	E "github.com/sagernet/sing/common/exceptions"

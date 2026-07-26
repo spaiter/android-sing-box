@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -281,7 +282,7 @@ func (c peerConfig) GenerateIpcLines() string {
 	var ipcLines strings.Builder
 	ipcLines.WriteString("\npublic_key=" + c.publicKeyHex)
 	if c.endpoint.IsValid() {
-		ipcLines.WriteString("\nendpoint=" + c.endpoint.String())
+		ipcLines.WriteString("\nendpoint=" + formatWGEndpoint(c.endpoint))
 	}
 	if c.preSharedKeyHex != "" {
 		ipcLines.WriteString("\npreshared_key=" + c.preSharedKeyHex)
@@ -293,4 +294,8 @@ func (c peerConfig) GenerateIpcLines() string {
 		ipcLines.WriteString("\npersistent_keepalive_interval=" + F.ToString(c.keepalive))
 	}
 	return ipcLines.String()
+}
+
+func formatWGEndpoint(endpoint netip.AddrPort) string {
+	return net.JoinHostPort(endpoint.Addr().String(), strconv.Itoa(int(endpoint.Port())))
 }

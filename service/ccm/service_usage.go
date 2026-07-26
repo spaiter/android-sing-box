@@ -1,8 +1,8 @@
 package ccm
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/goccy/go-json"
 	"math"
 	"os"
 	"regexp"

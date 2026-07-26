@@ -31,11 +31,15 @@ func ResetTransport(rawTransport http.RoundTripper) http.RoundTripper {
 		connPool := transportConnPool(transport)
 		p := (*clientConnPool)((*efaceWords)(unsafe.Pointer(&connPool)).data)
 		p.mu.Lock()
-		defer p.mu.Unlock()
+		connections := make(map[*http2.ClientConn]struct{})
 		for _, vv := range p.conns {
 			for _, cc := range vv {
-				cc.Close()
+				connections[cc] = struct{}{}
 			}
+		}
+		p.mu.Unlock()
+		for cc := range connections {
+			_ = cc.Close()
 		}
 		return transport
 	default:

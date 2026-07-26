@@ -46,7 +46,6 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	} else {
 		requestURL.Scheme = "wss"
 	}
-	requestURL.Host = serverAddr.String()
 	requestURL.Path = options.Path
 	err := sHTTP.URLSetPath(&requestURL, options.Path)
 	if err != nil {
@@ -59,6 +58,10 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	if host := headers.Get("Host"); host != "" {
 		headers.Del("Host")
 		requestURL.Host = host
+	} else if tlsConfig != nil && tlsConfig.ServerName() != "" {
+		requestURL.Host = tlsConfig.ServerName()
+	} else {
+		requestURL.Host = serverAddr.String()
 	}
 	if headers.Get("User-Agent") == "" {
 		headers.Set("User-Agent", "Go-http-client/1.1")

@@ -56,8 +56,8 @@ func (r *TransportRegistry) CreateOptions(transportType string) (any, bool) {
 
 func (r *TransportRegistry) CreateDNSTransport(ctx context.Context, logger log.ContextLogger, tag string, transportType string, options any) (adapter.DNSTransport, error) {
 	r.access.Lock()
-	defer r.access.Unlock()
 	constructor, loaded := r.constructors[transportType]
+	r.access.Unlock()
 	if !loaded {
 		return nil, E.New("transport type not found: " + transportType)
 	}

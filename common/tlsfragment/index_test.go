@@ -17,4 +17,8 @@ func TestIndexTLSServerName(t *testing.T) {
 	require.NotNil(t, serverName)
 	require.Equal(t, serverName.ServerName, string(payload[serverName.Index:serverName.Index+serverName.Length]))
 	require.Equal(t, "github.com", serverName.ServerName)
+
+	payload[serverName.Index-2] = 0xff
+	payload[serverName.Index-1] = 0xff
+	require.Nil(t, tf.IndexTLSServerName(payload))
 }

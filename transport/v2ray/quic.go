@@ -29,9 +29,9 @@ func NewQUICServer(ctx context.Context, logger logger.ContextLogger, options opt
 	return quicServerConstructor(ctx, logger, options, tlsConfig, handler)
 }
 
-func NewQUICClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayQUICOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
+func NewQUICClient(ctx context.Context, logger logger.ContextLogger, dialer N.Dialer, serverAddr M.Socksaddr, options option.V2RayQUICOptions, tlsConfig tls.Config) (adapter.V2RayClientTransport, error) {
 	if quicClientConstructor == nil {
 		return nil, os.ErrInvalid
 	}
-	return quicClientConstructor(ctx, dialer, serverAddr, options, tlsConfig)
+	return quicClientConstructor(ctx, logger, dialer, serverAddr, options, tlsConfig)
 }

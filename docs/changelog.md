@@ -5,6 +5,7 @@ icon: material/alert-decagram
 #### 1.13.14
 
 * Fixes and improvements
+* Improve MASQUE upload performance and add automatic HTTP/3 to HTTP/2 firewall fallback
 
 #### 1.13.13
 

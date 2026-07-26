@@ -1,7 +1,7 @@
 package option
 
 import (
-	"encoding/json"
+	"github.com/goccy/go-json"
 
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/json/badjson"

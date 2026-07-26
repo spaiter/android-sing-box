@@ -12,6 +12,12 @@ type DirectInboundOptions struct {
 	Network         NetworkList `json:"network,omitempty"`
 	OverrideAddress string      `json:"override_address,omitempty"`
 	OverridePort    uint16      `json:"override_port,omitempty"`
+	Fragment        *Fragment   `json:"fragment,omitempty"`
+}
+
+type Fragment struct {
+	Length   string `json:"length"`
+	Interval string `json:"interval"`
 }
 
 type _DirectOutboundOptions struct {
@@ -21,7 +27,8 @@ type _DirectOutboundOptions struct {
 	// Deprecated: Use Route Action instead
 	OverridePort uint16 `json:"override_port,omitempty"`
 	// Deprecated: removed
-	ProxyProtocol uint8 `json:"proxy_protocol,omitempty"`
+	ProxyProtocol uint8     `json:"proxy_protocol,omitempty"`
+	Fragment      *Fragment `json:"fragment,omitempty"`
 }
 
 type DirectOutboundOptions _DirectOutboundOptions

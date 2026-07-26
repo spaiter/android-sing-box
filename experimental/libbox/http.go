@@ -197,6 +197,7 @@ func (r *httpRequest) SetContentString(content string) {
 }
 
 func (r *httpRequest) Execute() (HTTPResponse, error) {
+	//nolint:bodyclose // the returned HTTPResponse owns and closes the body.
 	response, err := r.client.Do(&r.request)
 	if err != nil {
 		return nil, err

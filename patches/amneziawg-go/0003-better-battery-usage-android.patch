@@ -1,0 +1,238 @@
+diff --git a/device/device.go b/device/device.go
+index 2fdf85c..fcdc359 100644
+--- a/device/device.go
++++ b/device/device.go
+@@ -6,7 +6,6 @@
+ package device
+ 
+ import (
+-	"runtime"
+ 	"sync"
+ 	"sync/atomic"
+ 	"time"
+@@ -110,7 +109,8 @@ type Device struct {
+ 		transport int
+ 	}
+ 
+-	ipackets [5]*obfChain
++	fastRandom *fastRandom
++	ipackets   [5]*obfChain
+ }
+ 
+ // deviceState represents the state of a Device.
+@@ -320,6 +320,7 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+ 	device.peers.keyMap = make(map[NoisePublicKey]*Peer)
+ 	device.rate.limiter.Init()
+ 	device.indexTable.Init()
++	device.fastRandom = newFastRandom()
+ 
+ 	device.headers.init = &magicHeader{start: MessageInitiationType, end: MessageInitiationType}
+ 	device.headers.response = &magicHeader{start: MessageResponseType, end: MessageResponseType}
+@@ -336,7 +337,7 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+ 
+ 	// start workers
+ 
+-	cpus := runtime.NumCPU()
++	cpus := workerCount()
+ 	device.state.stopping.Wait()
+ 	device.queue.encryption.wg.Add(cpus) // One for each RoutineHandshake
+ 	for i := 0; i < cpus; i++ {
+diff --git a/device/fast_random.go b/device/fast_random.go
+new file mode 100644
+index 0000000..c1ae059
+--- /dev/null
++++ b/device/fast_random.go
+@@ -0,0 +1,47 @@
++package device
++
++import (
++	cryptorand "crypto/rand"
++	"encoding/binary"
++	randv2 "math/rand/v2"
++	"os"
++	"sync"
++	"time"
++)
++
++type fastRandom struct {
++	access sync.Mutex
++	source *randv2.ChaCha8
++}
++
++func newFastRandom() *fastRandom {
++	var seed [32]byte
++	if _, err := cryptorand.Read(seed[:]); err != nil {
++		binary.LittleEndian.PutUint64(seed[0:8], uint64(time.Now().UnixNano()))
++		binary.LittleEndian.PutUint64(seed[8:16], uint64(os.Getpid()))
++	}
++	return &fastRandom{
++		source: randv2.NewChaCha8(seed),
++	}
++}
++
++func (r *fastRandom) Read(p []byte) {
++	r.access.Lock()
++	_, _ = r.source.Read(p)
++	r.access.Unlock()
++}
++
++func (r *fastRandom) Uint64N(n uint64) uint64 {
++	if n <= 1 {
++		return 0
++	}
++	limit := ^uint64(0) - (^uint64(0) % n)
++	r.access.Lock()
++	defer r.access.Unlock()
++	for {
++		value := r.source.Uint64()
++		if value < limit {
++			return value % n
++		}
++	}
++}
+diff --git a/device/fast_random_test.go b/device/fast_random_test.go
+new file mode 100644
+index 0000000..4439b1d
+--- /dev/null
++++ b/device/fast_random_test.go
+@@ -0,0 +1,27 @@
++package device
++
++import (
++	"bytes"
++	"testing"
++)
++
++func TestFastRandomReadFillsBuffer(t *testing.T) {
++	random := newFastRandom()
++	buffer := make([]byte, 64)
++
++	random.Read(buffer)
++
++	if bytes.Equal(buffer, make([]byte, len(buffer))) {
++		t.Fatal("buffer was not filled")
++	}
++}
++
++func TestFastRandomUint64NBounds(t *testing.T) {
++	random := newFastRandom()
++
++	for range 1000 {
++		if value := random.Uint64N(7); value >= 7 {
++			t.Fatalf("value out of range: %d", value)
++		}
++	}
++}
+diff --git a/device/magic-header.go b/device/magic-header.go
+index 78e59d6..5096e8a 100644
+--- a/device/magic-header.go
++++ b/device/magic-header.go
+@@ -57,7 +57,18 @@ func (h *magicHeader) Validate(val uint32) bool {
+ }
+ 
+ func (h *magicHeader) Generate() uint32 {
++	if h.start == h.end {
++		return h.start
++	}
+ 	high := int64(h.end - h.start + 1)
+ 	r, _ := rand.Int(rand.Reader, big.NewInt(high))
+ 	return h.start + uint32(r.Int64())
+ }
++
++func (h *magicHeader) GenerateFast(random *fastRandom) uint32 {
++	if h.start == h.end {
++		return h.start
++	}
++	span := uint64(h.end) - uint64(h.start) + 1
++	return h.start + uint32(random.Uint64N(span))
++}
+diff --git a/device/magic_header_test.go b/device/magic_header_test.go
+new file mode 100644
+index 0000000..235b7c3
+--- /dev/null
++++ b/device/magic_header_test.go
+@@ -0,0 +1,28 @@
++package device
++
++import "testing"
++
++func TestMagicHeaderGenerateFixedValue(t *testing.T) {
++	header := &magicHeader{start: 4, end: 4}
++
++	for range 100 {
++		if value := header.Generate(); value != 4 {
++			t.Fatalf("value = %d", value)
++		}
++		if value := header.GenerateFast(newFastRandom()); value != 4 {
++			t.Fatalf("fast value = %d", value)
++		}
++	}
++}
++
++func TestMagicHeaderGenerateFastRange(t *testing.T) {
++	header := &magicHeader{start: 10, end: 20}
++	random := newFastRandom()
++
++	for range 1000 {
++		value := header.GenerateFast(random)
++		if value < 10 || value > 20 {
++			t.Fatalf("value out of range: %d", value)
++		}
++	}
++}
+diff --git a/device/send.go b/device/send.go
+index 0cc57da..ed0fdac 100644
+--- a/device/send.go
++++ b/device/send.go
+@@ -515,7 +515,7 @@ func (device *Device) RoutineEncryption(id int) {
+ 			fieldReceiver := header[4:8]
+ 			fieldNonce := header[8:16]
+ 
+-			msgType := device.headers.transport.Generate()
++			msgType := device.headers.transport.GenerateFast(device.fastRandom)
+ 
+ 			binary.LittleEndian.PutUint32(fieldType, msgType)
+ 			binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
+@@ -581,7 +581,7 @@ func (peer *Peer) RoutineSequentialSender(maxBatchSize int) {
+ 				for i := len(elem.packet) - 1; i >= 0; i-- {
+ 					elem.buffer[i+padding] = elem.buffer[i]
+ 				}
+-				rand.Read(elem.buffer[:padding])
++				device.fastRandom.Read(elem.buffer[:padding])
+ 				elem.packet = elem.buffer[:padding+len(elem.packet)]
+ 			}
+ 			bufs = append(bufs, elem.packet)
+diff --git a/device/worker_count.go b/device/worker_count.go
+new file mode 100644
+index 0000000..e41f15f
+--- /dev/null
++++ b/device/worker_count.go
+@@ -0,0 +1,13 @@
++package device
++
++import "runtime"
++
++const maxAndroidWorkers = 4
++
++func workerCount() int {
++	cpus := runtime.NumCPU()
++	if runtime.GOOS == "android" && cpus > maxAndroidWorkers {
++		return maxAndroidWorkers
++	}
++	return cpus
++}
+diff --git a/device/worker_count_test.go b/device/worker_count_test.go
+new file mode 100644
+index 0000000..6342a19
+--- /dev/null
++++ b/device/worker_count_test.go
+@@ -0,0 +1,9 @@
++package device
++
++import "testing"
++
++func TestWorkerCountIsPositive(t *testing.T) {
++	if workerCount() < 1 {
++		t.Fatal("worker count must be positive")
++	}
++}

@@ -31,12 +31,14 @@
 | `tuic`         | [TUIC](./tuic/)                 |
 | `hysteria2`    | [Hysteria2](./hysteria2/)       |
 | `anytls`       | [AnyTLS](./anytls/)             |
+| `snell`        | [Snell](./snell/)               |
 | `tor`          | [Tor](./tor/)                   |
 | `ssh`          | [SSH](./ssh/)                   |
 | `dns`          | [DNS](./dns/)                   |
 | `selector`     | [Selector](./selector/)         |
 | `urltest`      | [URLTest](./urltest/)           |
 | `naive`        | [NaiveProxy](./naive/)          |
+| `masque`       | [MASQUE](./masque/)              |
 
 #### tag
 
@@ -47,3 +49,4 @@ The tag of the outbound.
 #### Outbounds that support IP connection
 
 * `WireGuard`
+* `MASQUE`

@@ -43,6 +43,7 @@ func NewHTTP1Conn(conn net.Conn, request *http.Request) *HTTPConn {
 func (c *HTTPConn) Read(b []byte) (n int, err error) {
 	if !c.responseRead {
 		reader := std_bufio.NewReader(c.Conn)
+		//nolint:bodyclose // successful response bodies are backed by the returned connection.
 		response, err := http.ReadResponse(reader, c.request)
 		if err != nil {
 			return 0, E.Cause(err, "read response")

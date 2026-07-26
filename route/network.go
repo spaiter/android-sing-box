@@ -326,7 +326,12 @@ func (r *NetworkManager) DefaultNetworkInterface() *adapter.NetworkInterface {
 			return &it
 		}
 	}
-	return &adapter.NetworkInterface{Interface: *iif}
+	for _, it := range r.networkInterfaces.Load() {
+		if it.Interface.Name == iif.Name {
+			return &it
+		}
+	}
+	return nil
 }
 
 func (r *NetworkManager) NetworkInterfaces() []adapter.NetworkInterface {

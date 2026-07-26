@@ -8,7 +8,9 @@
 /dist/
 /sing-box
 /sing-box.exe
+/libcronet.so
 /build/
+/common/adblock/bridge/target/
 /*.jar
 /*.aar
 /*.xcframework/
@@ -21,3 +23,15 @@
 CLAUDE.md
 AGENTS.md
 /.claude/
+/.gocache/
+
+# Adblock
+common/adblock/adblockrust/resources/files
+!common/adblock/adblockrust/resources/files/placeholder.txt
+adblock.db
+experimental/adblock/db/adblock.db
+experimental/adblock/adblock.db
+# Local Pi runtime state
+.atl/
+.pi
+.cache

@@ -73,7 +73,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 	}, nil
 }
 
-func (c *Client) connect() (*grpc.ClientConn, error) {
+func (c *Client) connect(ctx context.Context) (*grpc.ClientConn, error) {
 	conn := c.conn.Load()
 	if conn != nil && conn.GetState() != connectivity.Shutdown {
 		return conn, nil
@@ -84,8 +84,12 @@ func (c *Client) connect() (*grpc.ClientConn, error) {
 	if conn != nil && conn.GetState() != connectivity.Shutdown {
 		return conn, nil
 	}
+	connectCtx, cancel := context.WithCancel(ctx)
+	stopClientCancel := context.AfterFunc(c.ctx, cancel)
+	defer stopClientCancel()
+	defer cancel()
 	//nolint:staticcheck
-	conn, err := grpc.DialContext(c.ctx, c.serverAddr, c.dialOptions...)
+	conn, err := grpc.DialContext(connectCtx, c.serverAddr, c.dialOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +98,7 @@ func (c *Client) connect() (*grpc.ClientConn, error) {
 }
 
 func (c *Client) DialContext(ctx context.Context) (net.Conn, error) {
-	clientConn, err := c.connect()
+	clientConn, err := c.connect(ctx)
 	if err != nil {
 		return nil, err
 	}

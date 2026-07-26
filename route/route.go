@@ -12,10 +12,10 @@ import (
 	"github.com/sagernet/sing-box/common/sniff"
 	C "github.com/sagernet/sing-box/constant"
 	R "github.com/sagernet/sing-box/route/rule"
-	"github.com/sagernet/sing-mux"
-	"github.com/sagernet/sing-tun"
+	mux "github.com/sagernet/sing-mux"
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing-tun/ping"
-	"github.com/sagernet/sing-vmess"
+	vmess "github.com/sagernet/sing-vmess"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
@@ -25,6 +25,7 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/uot"
+	"github.com/sagernet/sing/service"
 
 	"golang.org/x/exp/slices"
 )
@@ -49,11 +50,18 @@ func (r *Router) RouteConnectionEx(ctx context.Context, conn net.Conn, metadata 
 	err := r.routeConnection(ctx, conn, metadata, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
-		if E.IsClosedOrCanceled(err) || R.IsRejected(err) {
-			r.logger.DebugContext(ctx, "connection closed: ", err)
-		} else {
-			r.logger.ErrorContext(ctx, err)
-		}
+		r.logRouteError(ctx, err)
+	}
+}
+
+func (r *Router) logRouteError(ctx context.Context, err error) {
+	var adblockErr adblockBlockedError
+	if errors.As(err, &adblockErr) {
+		r.logger.InfoContext(ctx, adblockErr)
+	} else if E.IsClosedOrCanceled(err) || R.IsRejected(err) {
+		r.logger.DebugContext(ctx, "connection closed: ", err)
+	} else {
+		r.logger.ErrorContext(ctx, err)
 	}
 }
 
@@ -94,6 +102,13 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	selectedRule, _, buffers, _, err := r.matchRule(ctx, &metadata, false, false, conn, nil)
 	if err != nil {
 		return err
+	}
+	adblockService := service.FromContext[adapter.AdblockService](r.ctx)
+	if adblockService != nil && metadata.Protocol == "" {
+		newBuffer, _, _ := r.actionSniff(ctx, &metadata, &R.RuleActionSniff{}, conn, nil, buffers, nil)
+		if newBuffer != nil {
+			buffers = append(buffers, newBuffer)
+		}
 	}
 	var selectedOutbound adapter.Outbound
 	if selectedRule != nil {
@@ -149,8 +164,17 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
 	for _, buffer := range buffers {
 		conn = bufio.NewCachedConn(conn, buffer)
 	}
+	if adblockService != nil {
+		handled, err := adblockService.HandleTCP(ctx, conn, metadata, selectedOutbound, onClose)
+		if handled {
+			return err
+		}
+	}
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
+	}
+	if r.nekoTracker != nil {
+		conn = r.nekoTracker.RoutedConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
 	if outboundHandler, isHandler := selectedOutbound.(adapter.ConnectionHandlerEx); isHandler {
 		outboundHandler.NewConnectionEx(ctx, conn, metadata, onClose)
@@ -167,11 +191,7 @@ func (r *Router) RoutePacketConnection(ctx context.Context, conn N.PacketConn, m
 	}))
 	if err != nil {
 		conn.Close()
-		if E.IsClosedOrCanceled(err) || R.IsRejected(err) {
-			r.logger.DebugContext(ctx, "connection closed: ", err)
-		} else {
-			r.logger.ErrorContext(ctx, err)
-		}
+		r.logRouteError(ctx, err)
 	}
 	select {
 	case <-done:
@@ -184,11 +204,7 @@ func (r *Router) RoutePacketConnectionEx(ctx context.Context, conn N.PacketConn,
 	err := r.routePacketConnection(ctx, conn, metadata, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
-		if E.IsClosedOrCanceled(err) || R.IsRejected(err) {
-			r.logger.DebugContext(ctx, "connection closed: ", err)
-		} else {
-			r.logger.ErrorContext(ctx, err)
-		}
+		r.logRouteError(ctx, err)
 	}
 }
 
@@ -223,6 +239,13 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 	selectedRule, _, _, packetBuffers, err := r.matchRule(ctx, &metadata, false, false, nil, conn)
 	if err != nil {
 		return err
+	}
+	adblockService := service.FromContext[adapter.AdblockService](r.ctx)
+	if adblockService != nil && metadata.Protocol == "" {
+		_, newPacketBuffers, _ := r.actionSniff(ctx, &metadata, &R.RuleActionSniff{}, nil, conn, nil, packetBuffers)
+		if len(newPacketBuffers) > 0 {
+			packetBuffers = newPacketBuffers
+		}
 	}
 	var selectedOutbound adapter.Outbound
 	var selectReturn bool
@@ -271,15 +294,21 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		}
 		selectedOutbound = defaultOutbound
 	}
-	for _, buffer := range packetBuffers {
-		conn = bufio.NewCachedPacketConn(conn, buffer.Buffer, buffer.Destination)
-		N.PutPacketBuffer(buffer)
-	}
+	conn = cachePacketBuffers(conn, packetBuffers)
 	for _, tracker := range r.trackers {
 		conn = tracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
 	}
+	if r.nekoTracker != nil {
+		conn = r.nekoTracker.RoutedPacketConnection(ctx, conn, metadata, selectedRule, selectedOutbound)
+	}
 	if metadata.FakeIP {
 		conn = bufio.NewNATPacketConn(bufio.NewNetPacketConn(conn), metadata.OriginDestination, metadata.Destination)
+	}
+	if adblockService != nil {
+		handled, err := adblockService.HandleUDP(ctx, conn, metadata, selectedOutbound, onClose)
+		if handled {
+			return err
+		}
 	}
 	if outboundHandler, isHandler := selectedOutbound.(adapter.PacketConnectionHandlerEx); isHandler {
 		outboundHandler.NewPacketConnectionEx(ctx, conn, metadata, onClose)
@@ -287,6 +316,15 @@ func (r *Router) routePacketConnection(ctx context.Context, conn N.PacketConn, m
 		r.connection.NewPacketConnection(ctx, selectedOutbound, conn, metadata, onClose)
 	}
 	return nil
+}
+
+func cachePacketBuffers(conn N.PacketConn, packetBuffers []*N.PacketBuffer) N.PacketConn {
+	for i := len(packetBuffers) - 1; i >= 0; i-- {
+		packetBuffer := packetBuffers[i]
+		conn = bufio.NewCachedPacketConn(conn, packetBuffer.Buffer, packetBuffer.Destination)
+		N.PutPacketBuffer(packetBuffer)
+	}
+	return conn
 }
 
 func (r *Router) PreMatch(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration, supportBypass bool) (tun.DirectRouteDestination, error) {

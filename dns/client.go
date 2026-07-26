@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing/common/task"
 	"github.com/sagernet/sing/contrab/freelru"
 	"github.com/sagernet/sing/contrab/maphash"
+	"github.com/sagernet/sing/service"
 
 	"github.com/miekg/dns"
 )
@@ -170,6 +171,9 @@ func (c *Client) Exchange(ctx context.Context, transport adapter.DNSTransport, m
 		}
 		response, ttl := c.loadResponse(question, transport)
 		if response != nil {
+			if adblockService := service.FromContext[adapter.AdblockService](ctx); adblockService != nil {
+				adblockService.CheckDNSResponse(ctx, message, response)
+			}
 			logCachedResponse(c.logger, ctx, response, ttl)
 			response.Id = message.Id
 			return response, nil
@@ -316,6 +320,9 @@ func (c *Client) Exchange(ctx context.Context, transport adapter.DNSTransport, m
 		}
 	}
 	logExchangedResponse(c.logger, ctx, response, timeToLive)
+	if adblockService := service.FromContext[adapter.AdblockService](ctx); adblockService != nil {
+		adblockService.CheckDNSResponse(ctx, message, response)
+	}
 	return response, nil
 }
 

@@ -4,7 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/tls"
-	"encoding/json"
+	"github.com/goccy/go-json"
 	"io"
 	"net"
 	"net/http"

@@ -92,7 +92,7 @@ func newV2RayPlugin(ctx context.Context, pluginOpts Args, router adapter.Router,
 		return nil, E.New("v2ray-plugin: unknown mode: " + mode)
 	}
 
-	transport, err := v2ray.NewClientTransport(context.Background(), dialer, serverAddr, transportOptions, tlsClient)
+	transport, err := v2ray.NewClientTransport(context.Background(), logger.NOP(), dialer, serverAddr, transportOptions, tlsClient)
 	if err != nil {
 		return nil, err
 	}

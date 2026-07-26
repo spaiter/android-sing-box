@@ -47,30 +47,16 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 		}()
 		serverName := IndexTLSServerName(b)
 		if serverName != nil {
+			splitIndexes := fragmentServerNameIndexes(serverName.ServerName, serverName.Index)
+			if len(splitIndexes) == 0 {
+				return c.Conn.Write(b)
+			}
 			if c.splitPacket {
 				if c.tcpConn != nil {
 					err = c.tcpConn.SetNoDelay(true)
 					if err != nil {
 						return
 					}
-				}
-			}
-			splits := strings.Split(serverName.ServerName, ".")
-			currentIndex := serverName.Index
-			if publicSuffix := publicsuffix.List.PublicSuffix(serverName.ServerName); publicSuffix != "" {
-				splits = splits[:len(splits)-strings.Count(serverName.ServerName, ".")]
-			}
-			if len(splits) > 1 && splits[0] == "..." {
-				currentIndex += len(splits[0]) + 1
-				splits = splits[1:]
-			}
-			var splitIndexes []int
-			for i, split := range splits {
-				splitAt := rand.Intn(len(split))
-				splitIndexes = append(splitIndexes, currentIndex+splitAt)
-				currentIndex += len(split)
-				if i != len(splits)-1 {
-					currentIndex++
 				}
 			}
 			var buffer bytes.Buffer
@@ -131,6 +117,30 @@ func (c *Conn) Write(b []byte) (n int, err error) {
 		}
 	}
 	return c.Conn.Write(b)
+}
+
+func fragmentServerNameIndexes(serverName string, currentIndex int) []int {
+	fragmentServerName := strings.TrimLeft(serverName, ".")
+	currentIndex += len(serverName) - len(fragmentServerName)
+	if fragmentServerName == "" {
+		return nil
+	}
+	splits := strings.Split(fragmentServerName, ".")
+	if publicSuffix := publicsuffix.List.PublicSuffix(fragmentServerName); publicSuffix != "" {
+		splits = splits[:len(splits)-strings.Count(fragmentServerName, ".")]
+	}
+	var splitIndexes []int
+	for i, split := range splits {
+		if split != "" {
+			splitAt := rand.Intn(len(split))
+			splitIndexes = append(splitIndexes, currentIndex+splitAt)
+		}
+		currentIndex += len(split)
+		if i != len(splits)-1 {
+			currentIndex++
+		}
+	}
+	return splitIndexes
 }
 
 func (c *Conn) ReaderReplaceable() bool {

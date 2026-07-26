@@ -53,5 +53,7 @@ func DomainNameQuery(ctx context.Context, metadata *adapter.InboundContext, pack
 		return err
 	}
 	metadata.Protocol = C.ProtocolDNS
+	metadata.Domain = mDNS.Fqdn(msg.Question[0].Name)
+	metadata.Domain = metadata.Domain[:len(metadata.Domain)-1]
 	return nil
 }

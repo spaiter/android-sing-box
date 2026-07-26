@@ -104,6 +104,10 @@ func TestMuxCoolClient(t *testing.T) {
 					},
 					UUID:           user.String(),
 					PacketEncoding: "xudp",
+					Multiplex: &option.OutboundMultiplexOptions{
+						Enabled:  true,
+						Protocol: "mux.cool",
+					},
 				},
 			},
 		},

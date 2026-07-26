@@ -13,12 +13,18 @@ MAIN = ./cmd/sing-box
 PREFIX ?= $(shell go env GOPATH)
 SING_FFI ?= sing-ffi
 LIBBOX_FFI_CONFIG ?= ./experimental/libbox/ffi.json
+BUILD_MOD =
+
+ifneq ($(findstring with_awg,$(TAGS)),)
+BUILD_MOD = -mod=vendor
+endif
 
 .PHONY: test release docs build
 
 build:
+	$(if $(findstring with_awg,$(TAGS)),@echo "Preparing patched AWG dependency..." && $(MAKE) patch-deps,)
 	export GOTOOLCHAIN=local && \
-	go build $(MAIN_PARAMS) $(MAIN)
+	go build $(BUILD_MOD) $(MAIN_PARAMS) $(MAIN)
 
 race:
 	export GOTOOLCHAIN=local && \
@@ -33,7 +39,8 @@ generate_completions:
 	go run -v --tags "$(TAGS),generate,generate_completions" $(MAIN)
 
 install:
-	go build -o $(PREFIX)/bin/$(NAME) $(MAIN_PARAMS) $(MAIN)
+	$(if $(findstring with_awg,$(TAGS)),@echo "Preparing patched AWG dependency..." && $(MAKE) patch-deps,)
+	go build $(BUILD_MOD) -o $(PREFIX)/bin/$(NAME) $(MAIN_PARAMS) $(MAIN)
 
 fmt:
 	@golangci-lint fmt

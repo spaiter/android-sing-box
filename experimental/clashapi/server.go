@@ -165,10 +165,14 @@ func (s *Server) Start(stage adapter.StartStage) error {
 				err      error
 			)
 			for range 3 {
-				listener, err = net.Listen("tcp", s.httpServer.Addr)
+				listenerNet, listenerAddr := s.getClashApiListener()
+				listener, err = net.Listen(listenerNet, listenerAddr)
 				if runtime.GOOS == "android" && errors.Is(err, syscall.EADDRINUSE) {
 					time.Sleep(100 * time.Millisecond)
 					continue
+				}
+				if listenerNet == "unix" {
+					_ = os.Chmod(listenerAddr, 0660)
 				}
 				break
 			}
@@ -432,4 +436,23 @@ func getLogs(ctx context.Context, logFactory log.ObservableFactory) func(w http.
 
 func version(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, render.M{"version": "sing-box " + C.Version, "premium": true, "meta": true})
+}
+
+func (s *Server) getClashApiListener() (string, string) {
+	addr := s.httpServer.Addr
+
+	var network string
+
+	if strings.HasPrefix(addr, "unix://") {
+		network = "unix"
+		addr = strings.TrimPrefix(addr, "unix://")
+
+		// Optional but important:
+		// remove stale socket file
+		_ = os.Remove(addr)
+	} else {
+		network = "tcp"
+	}
+
+	return network, addr
 }

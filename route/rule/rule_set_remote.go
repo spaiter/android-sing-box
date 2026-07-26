@@ -255,6 +255,7 @@ func (s *RemoteRuleSet) fetch(ctx context.Context, startContext *adapter.HTTPSta
 	if err != nil {
 		return err
 	}
+	request.Header.Set("Accept", "application/octet-stream")
 	if s.lastEtag != "" {
 		request.Header.Set("If-None-Match", s.lastEtag)
 	}

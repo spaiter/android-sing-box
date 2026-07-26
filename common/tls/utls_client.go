@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/common/tlsfragment"
+	tf "github.com/sagernet/sing-box/common/tlsfragment"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common"
@@ -218,7 +218,7 @@ func NewUTLSClient(ctx context.Context, logger logger.ContextLogger, serverAddre
 	if len(certificate) > 0 {
 		certPool := x509.NewCertPool()
 		if !certPool.AppendCertsFromPEM(certificate) {
-			return nil, E.New("failed to parse certificate:\n\n", certificate)
+			return nil, E.New("failed to parse certificate:\n\n", string(certificate))
 		}
 		tlsConfig.RootCAs = certPool
 	}
@@ -327,6 +327,9 @@ func uTLSClientHelloID(name string) (utls.ClientHelloID, error) {
 	case "randomized":
 		return randomizedFingerprint, nil
 	default:
+		if extended := uTLSClientHelloIDExtended(name); extended != nil {
+			return *extended, nil
+		}
 		return utls.ClientHelloID{}, E.New("unknown uTLS fingerprint: ", name)
 	}
 }
