@@ -25,6 +25,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/masque"
 	"github.com/sagernet/sing-box/protocol/mieru"
+	protocolwdtt "github.com/sagernet/sing-box/protocol/wdtt"
 	"github.com/sagernet/sing-box/protocol/mixed"
 	"github.com/sagernet/sing-box/protocol/naive"
 	"github.com/sagernet/sing-box/protocol/redirect"
@@ -101,6 +102,7 @@ func OutboundRegistry() *outbound.Registry {
 	anytls.RegisterOutbound(registry)
 	snellprotocol.RegisterOutbound(registry)
 	masque.RegisterOutbound(registry)
+	protocolwdtt.RegisterOutbound(registry)
 
 	registerQUICOutbounds(registry)
 	registerAwgOutbound(registry)

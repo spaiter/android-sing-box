@@ -17,7 +17,7 @@ require (
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/insomniacslk/dhcp v0.0.0-20260220084031-5adc3eb26f91
 	github.com/keybase/go-keychain v0.0.1
-	github.com/klauspost/compress v1.18.0
+	github.com/klauspost/compress v1.18.2
 	github.com/libdns/acmedns v0.5.0
 	github.com/libdns/alidns v1.0.6
 	github.com/libdns/cloudflare v0.2.2
@@ -85,14 +85,28 @@ require (
 	github.com/andybalholm/cascadia v1.3.4
 	github.com/antchfx/htmlquery v1.3.6
 	github.com/antchfx/xpath v1.3.6
+	github.com/bogdanfinn/fhttp v0.6.8
+	github.com/bogdanfinn/tls-client v1.14.0
+	github.com/cbeuw/connutil v1.0.1
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/klauspost/cpuid/v2 v2.3.0
+	github.com/pion/dtls/v3 v3.1.2
+	github.com/pion/logging v0.2.4
+	github.com/pion/transport/v4 v4.0.1
+	github.com/pion/turn/v5 v5.0.2
 	lukechampine.com/blake3 v1.3.0
 )
 
 require (
-	github.com/kr/pretty v0.3.1 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+	github.com/bdandy/go-errors v1.2.2 // indirect
+	github.com/bdandy/go-socks4 v1.2.3 // indirect
+	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
+	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
+	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
+	github.com/pion/randutil v0.1.0 // indirect
+	github.com/pion/stun/v3 v3.1.1 // indirect
+	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
 )
 
 require (
@@ -106,7 +120,7 @@ require (
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
-	github.com/andybalholm/brotli v1.1.0
+	github.com/andybalholm/brotli v1.2.0
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/coreos/go-iptables v0.8.0 // indirect
@@ -129,7 +143,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
