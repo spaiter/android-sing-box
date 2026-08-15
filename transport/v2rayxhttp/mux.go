@@ -51,6 +51,15 @@ func NewXmuxManager(options option.V2RayXHTTPXmuxOptions, newConnFunc func() Xmu
 	}
 }
 
+func (m *XmuxManager) Close() {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	for _, xmuxClient := range m.xmuxClients {
+		xmuxClient.Close()
+	}
+	m.xmuxClients = m.xmuxClients[:0]
+}
+
 func (m *XmuxManager) newXmuxClient() *XmuxClient {
 	xmuxClient := &XmuxClient{
 		XmuxConn:  m.newConnFunc(),
