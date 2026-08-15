@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net"
+	"net/http"
 	"os"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -25,8 +26,15 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
-	logger logger.ContextLogger
-	client *sHTTP.Client
+	logger    logger.ContextLogger
+	client    *sHTTP.Client
+	tlsDialer tls.Dialer
+	server    M.Socksaddr
+	username  string
+	password  string
+	host      string
+	path      string
+	headers   http.Header
 }
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.HTTPOutboundOptions) (adapter.Outbound, error) {
@@ -38,6 +46,17 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	headers := options.Headers.Build()
+	var host string
+	if headers != nil {
+		host = headers.Get("Host")
+	}
+	var tlsDetour tls.Dialer
+	if options.TLS != nil && options.TLS.Enabled {
+		if tlsDialer, isTLSDialer := detour.(tls.Dialer); isTLSDialer {
+			tlsDetour = tlsDialer
+		}
+	}
 	return &Outbound{
 		Adapter: outbound.NewAdapterWithDialerOptions(C.TypeHTTP, tag, []string{N.NetworkTCP}, options.DialerOptions),
 		logger:  logger,
@@ -47,8 +66,15 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			Username: options.Username,
 			Password: options.Password,
 			Path:     options.Path,
-			Headers:  options.Headers.Build(),
+			Headers:  headers,
 		}),
+		tlsDialer: tlsDetour,
+		server:    options.ServerOptions.Build(),
+		username:  options.Username,
+		password:  options.Password,
+		host:      host,
+		path:      options.Path,
+		headers:   headers,
 	}, nil
 }
 
@@ -57,6 +83,29 @@ func (h *Outbound) DialContext(ctx context.Context, network string, destination 
 	metadata.Outbound = h.Tag()
 	metadata.Destination = destination
 	h.logger.InfoContext(ctx, "outbound connection to ", destination)
+	if h.tlsDialer != nil {
+		tlsConn, err := h.tlsDialer.DialTLSContext(ctx, h.server)
+		if err != nil {
+			return nil, err
+		}
+		if stateConn, ok := tlsConn.(connectionStateConn); ok {
+			if stateConn.ConnectionState().NegotiatedProtocol == "h2" {
+				return dialH2Connect(ctx, tlsConn, destination, h.host, h.username, h.password, h.headers)
+			}
+		}
+		fallbackHeaders := h.headers.Clone()
+		if h.host != "" {
+			fallbackHeaders.Set("Host", h.host)
+		}
+		return sHTTP.NewClient(sHTTP.Options{
+			Dialer:   &singleConnDialer{conn: tlsConn},
+			Server:   h.server,
+			Username: h.username,
+			Password: h.password,
+			Path:     h.path,
+			Headers:  fallbackHeaders,
+		}).DialContext(ctx, network, destination)
+	}
 	return h.client.DialContext(ctx, network, destination)
 }
 
