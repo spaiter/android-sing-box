@@ -40,6 +40,7 @@ icon: material/new-box
   "reuse": false,
   "network": "tcp",
   "mode": "",
+  "quic_proxy_mode": false,
 
   ... // Dial Fields
 }
@@ -61,7 +62,9 @@ The server port.
 
 #### version
 
-The Snell protocol version, one of `1` `2` `3` `4` `5` `6`. Defaults to `4`.
+==Required==
+
+The Snell protocol version, one of `1` `2` `3` `4` `5` `6`.
 
 | Version | TCP | UDP |
 |---------|-----|-----|
@@ -69,7 +72,7 @@ The Snell protocol version, one of `1` `2` `3` `4` `5` `6`. Defaults to `4`.
 | 3 | Yes | UDP over TCP |
 | 4 | Yes | UDP over TCP |
 | 5 | Yes | QUIC Proxy for QUIC; UDP over TCP otherwise |
-| 6 | Yes | UDP over TCP |
+| 6 | Yes | UDP over TCP; optional QUIC Proxy compatibility |
 
 Versions 4 and 5 use the same TCP wire protocol. Version 5 only adds QUIC Proxy Mode.
 
@@ -127,6 +130,18 @@ The HTTP `Host` header sent when `obfs_mode` is `http`.
 Traffic shaping mode, one of `default` `unshaped` `unsafe-raw`.
 
 `default` is used by default.
+
+#### quic_proxy_mode
+
+==Version 6 only==
+
+Enable the legacy Snell v5 QUIC Proxy Mode for QUIC traffic while keeping other
+UDP traffic on the Snell v6 UDP-over-TCP path.
+
+Disabled by default. This is a compatibility option for Surge clients that use
+QUIC Proxy Mode with a Snell v6 node, even though the standard Snell v6 protocol
+does not support that mode. The server must provide the corresponding UDP
+listener on the Snell port.
 
 ### Dial Fields
 

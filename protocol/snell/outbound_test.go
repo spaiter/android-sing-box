@@ -2,6 +2,7 @@ package snell
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -44,6 +45,59 @@ func TestValidateSnellOutboundVersionOptions(t *testing.T) {
 		require.NoError(t, validateSnellOutboundVersionOptions(version, true))
 	}
 	require.NoError(t, validateSnellOutboundVersionOptions(3, false))
+}
+
+func TestSnellOutboundRequiresVersion(t *testing.T) {
+	created, err := NewOutbound(
+		context.Background(),
+		nil,
+		log.NewNOPFactory().NewLogger("snell"),
+		"snell-out",
+		option.SnellOutboundOptions{
+			AbstractSnellOutboundOptions: option.AbstractSnellOutboundOptions{
+				ServerOptions: option.ServerOptions{
+					Server:     "127.0.0.1",
+					ServerPort: 1080,
+				},
+				PSK: "password",
+			},
+		},
+	)
+	require.Nil(t, created)
+	require.EqualError(t, err, "snell: missing version")
+}
+
+func TestV6QUICProxyModeConfiguration(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint("enabled-", enabled), func(t *testing.T) {
+			created, err := NewOutbound(
+				context.Background(),
+				nil,
+				log.NewNOPFactory().NewLogger("snell"),
+				"snell-out",
+				option.SnellOutboundOptions{
+					AbstractSnellOutboundOptions: option.AbstractSnellOutboundOptions{
+						ServerOptions: option.ServerOptions{
+							Server:     "127.0.0.1",
+							ServerPort: 1080,
+						},
+						PSK: "test-password",
+					},
+					Version:   6,
+					V6Options: option.SnellV6OutboundOptions{QUICProxyMode: enabled},
+				},
+			)
+			require.NoError(t, err)
+			outbound := created.(*Outbound)
+			require.Equal(t, enabled, outbound.quicProxyMode)
+			if enabled {
+				require.NotNil(t, outbound.quicDestCache)
+			} else {
+				require.Nil(t, outbound.quicDestCache)
+			}
+			require.NoError(t, outbound.Close())
+		})
+	}
 }
 
 func TestValidateSnellOutboundObfs(t *testing.T) {
@@ -92,7 +146,7 @@ func TestQUICDestCacheCloseRefreshesAfterOriginalExpiry(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return outbound.quicDestCache.Len() == 0
 	}, time.Second, 10*time.Millisecond)
-	packetConn := &v5LazyPacketConn{
+	packetConn := &quicProxyLazyPacketConn{
 		outbound:      outbound,
 		source:        source,
 		destination:   destination,
@@ -115,8 +169,8 @@ func TestQUICDestCacheCloseKeepsNewerToken(t *testing.T) {
 	require.Equal(t, newToken, token)
 }
 
-func TestV5LazyPacketConnCloseUnblocksRead(t *testing.T) {
-	packetConn := newV5LazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
+func TestQUICProxyLazyPacketConnCloseUnblocksRead(t *testing.T) {
+	packetConn := newQUICProxyLazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
 	readDone := make(chan error, 1)
 	go func() {
 		_, _, err := packetConn.ReadFrom(make([]byte, 1))
@@ -133,25 +187,25 @@ func TestV5LazyPacketConnCloseUnblocksRead(t *testing.T) {
 	require.ErrorIs(t, err, net.ErrClosed)
 }
 
-func TestV5LazyPacketConnReadDeadlineBeforeInit(t *testing.T) {
-	packetConn := newV5LazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
+func TestQUICProxyLazyPacketConnReadDeadlineBeforeInit(t *testing.T) {
+	packetConn := newQUICProxyLazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
 	t.Cleanup(func() { packetConn.Close() })
 	require.NoError(t, packetConn.SetReadDeadline(time.Now().Add(20*time.Millisecond)))
 	_, _, err := packetConn.ReadFrom(make([]byte, 1))
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 }
 
-func TestV5LazyPacketConnWriteDeadlineBeforeInit(t *testing.T) {
-	packetConn := newV5LazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
+func TestQUICProxyLazyPacketConnWriteDeadlineBeforeInit(t *testing.T) {
+	packetConn := newQUICProxyLazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, false)
 	t.Cleanup(func() { packetConn.Close() })
 	require.NoError(t, packetConn.SetWriteDeadline(time.Now().Add(-time.Second)))
 	_, err := packetConn.WriteTo([]byte{1}, M.Socksaddr{})
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 }
 
-func TestV5LazyPacketConnEmptyWriteDoesNotInitialize(t *testing.T) {
+func TestQUICProxyLazyPacketConnEmptyWriteDoesNotInitialize(t *testing.T) {
 	for _, sniffQUIC := range []bool{false, true} {
-		packetConn := newV5LazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, sniffQUIC)
+		packetConn := newQUICProxyLazyPacketConn(context.Background(), nil, M.Socksaddr{}, M.Socksaddr{}, sniffQUIC)
 		_, err := packetConn.WriteTo(nil, M.Socksaddr{})
 		require.NoError(t, err)
 		select {
@@ -179,38 +233,43 @@ func (c *captureQUICProxyWritesConn) SetDeadline(time.Time) error      { return 
 func (c *captureQUICProxyWritesConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *captureQUICProxyWritesConn) SetWriteDeadline(time.Time) error { return nil }
 
-func TestV5DialContextUsesQUICDestCache(t *testing.T) {
-	psk := []byte("test-password")
-	serverConn := new(captureQUICProxyWritesConn)
-	source := M.ParseSocksaddr("127.0.0.1:10000")
-	destination := M.ParseSocksaddr("example.com:443")
-	outbound := &Outbound{
-		logger:        log.NewNOPFactory().NewLogger("snell"),
-		dialer:        &v5DeadlineTestDialer{conn: serverConn},
-		serverAddr:    M.ParseSocksaddr("127.0.0.1:63389"),
-		psk:           psk,
-		userKey:       []byte("alice"),
-		version:       5,
-		quicDestCache: expiringmap.New[quicDestCacheKey, uint64](time.Minute),
+func TestQUICProxyDialContextUsesQUICDestCache(t *testing.T) {
+	for _, version := range []int{5, 6} {
+		t.Run(fmt.Sprint("v", version), func(t *testing.T) {
+			psk := []byte("test-password")
+			serverConn := new(captureQUICProxyWritesConn)
+			source := M.ParseSocksaddr("127.0.0.1:10000")
+			destination := M.ParseSocksaddr("example.com:443")
+			outbound := &Outbound{
+				logger:        log.NewNOPFactory().NewLogger("snell"),
+				dialer:        &lazyPacketTestDialer{conn: serverConn},
+				serverAddr:    M.ParseSocksaddr("127.0.0.1:63389"),
+				psk:           psk,
+				userKey:       []byte("alice"),
+				version:       version,
+				quicProxyMode: true,
+				quicDestCache: expiringmap.New[quicDestCacheKey, uint64](time.Minute),
+			}
+			t.Cleanup(outbound.quicDestCache.Close)
+			outbound.markQUICDest(source, destination)
+			ctx, metadata := adapter.ExtendContext(context.Background())
+			metadata.Source = source
+			conn, err := outbound.DialContext(ctx, N.NetworkUDP, destination)
+			require.NoError(t, err)
+			t.Cleanup(func() { conn.Close() })
+			payload := []byte{0x40, 1, 2, 3}
+			written, err := conn.Write(payload)
+			require.NoError(t, err)
+			require.Equal(t, len(payload), written)
+			require.Len(t, serverConn.writes, 1)
+			_, _, initPayload, err := snellprotocol.DecodeQUICProxyInit(psk, serverConn.writes[0])
+			require.NoError(t, err)
+			require.Equal(t, payload, initPayload)
+		})
 	}
-	t.Cleanup(outbound.quicDestCache.Close)
-	outbound.markQUICDest(source, destination)
-	ctx, metadata := adapter.ExtendContext(context.Background())
-	metadata.Source = source
-	conn, err := outbound.DialContext(ctx, N.NetworkUDP, destination)
-	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
-	payload := []byte{0x40, 1, 2, 3}
-	written, err := conn.Write(payload)
-	require.NoError(t, err)
-	require.Equal(t, len(payload), written)
-	require.Len(t, serverConn.writes, 1)
-	_, _, initPayload, err := snellprotocol.DecodeQUICProxyInit(psk, serverConn.writes[0])
-	require.NoError(t, err)
-	require.Equal(t, payload, initPayload)
 }
 
-func TestV5LazyPacketConnIncludesFirstPayloadInInit(t *testing.T) {
+func TestQUICProxyLazyPacketConnIncludesFirstPayloadInInit(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
 		sniffQUIC bool
@@ -224,12 +283,12 @@ func TestV5LazyPacketConnIncludesFirstPayloadInInit(t *testing.T) {
 			serverConn := new(captureQUICProxyWritesConn)
 			destination := M.ParseSocksaddr("example.com:443")
 			outbound := &Outbound{
-				dialer:     &v5DeadlineTestDialer{conn: serverConn},
+				dialer:     &lazyPacketTestDialer{conn: serverConn},
 				serverAddr: M.ParseSocksaddr("127.0.0.1:63389"),
 				psk:        psk,
 				userKey:    []byte("alice"),
 			}
-			packetConn := newV5LazyPacketConn(context.Background(), outbound, M.ParseSocksaddr("127.0.0.1:10000"), destination, testCase.sniffQUIC)
+			packetConn := newQUICProxyLazyPacketConn(context.Background(), outbound, M.ParseSocksaddr("127.0.0.1:10000"), destination, testCase.sniffQUIC)
 			t.Cleanup(func() { packetConn.Close() })
 			written, err := packetConn.WriteTo(testCase.payload, destination)
 			require.NoError(t, err)
@@ -245,51 +304,66 @@ func TestV5LazyPacketConnIncludesFirstPayloadInInit(t *testing.T) {
 	}
 }
 
-type v5DeadlineTestDialer struct {
+type lazyPacketTestDialer struct {
 	conn net.Conn
 }
 
-func (d *v5DeadlineTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
+func (d *lazyPacketTestDialer) DialContext(context.Context, string, M.Socksaddr) (net.Conn, error) {
 	return d.conn, nil
 }
 
-func (d *v5DeadlineTestDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
+func (d *lazyPacketTestDialer) ListenPacket(context.Context, M.Socksaddr) (net.PacketConn, error) {
 	panic("unexpected ListenPacket")
 }
 
-type v5DeadlineTestClient struct {
+type lazyPacketTestClient struct {
 	writeStarted chan struct{}
+	resetCalled  bool
 }
 
-func (c *v5DeadlineTestClient) DialContext(context.Context, M.Socksaddr) (net.Conn, error) {
+func (c *lazyPacketTestClient) DialContext(context.Context, M.Socksaddr) (net.Conn, error) {
 	panic("unexpected DialContext")
 }
 
-func (c *v5DeadlineTestClient) DialConn(net.Conn, M.Socksaddr) (net.Conn, error) {
+func (c *lazyPacketTestClient) DialConn(net.Conn, M.Socksaddr) (net.Conn, error) {
 	panic("unexpected DialConn")
 }
 
-func (c *v5DeadlineTestClient) DialEarlyConn(net.Conn, M.Socksaddr) net.Conn {
+func (c *lazyPacketTestClient) DialEarlyConn(net.Conn, M.Socksaddr) net.Conn {
 	panic("unexpected DialEarlyConn")
 }
 
-func (c *v5DeadlineTestClient) DialPacketConn(conn net.Conn) (N.NetPacketConn, error) {
+func (c *lazyPacketTestClient) DialPacketConn(conn net.Conn) (N.NetPacketConn, error) {
 	close(c.writeStarted)
 	_, err := conn.Write([]byte{1})
 	return nil, err
 }
 
-func (c *v5DeadlineTestClient) Close() error { return nil }
+func (c *lazyPacketTestClient) Reset() { c.resetCalled = true }
 
-func TestV5LazyPacketConnWriteDeadlineDuringInit(t *testing.T) {
+func (c *lazyPacketTestClient) Close() error { return nil }
+
+func TestInterfaceUpdated(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) {
+		require.NotPanics(t, (&Outbound{}).InterfaceUpdated)
+	})
+	t.Run("client", func(t *testing.T) {
+		client := &lazyPacketTestClient{}
+		outbound := &Outbound{client: client}
+		outbound.InterfaceUpdated()
+		require.True(t, client.resetCalled)
+	})
+}
+
+func TestQUICProxyLazyPacketConnWriteDeadlineDuringInit(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	t.Cleanup(func() { serverConn.Close() })
-	client := &v5DeadlineTestClient{writeStarted: make(chan struct{})}
+	client := &lazyPacketTestClient{writeStarted: make(chan struct{})}
 	outbound := &Outbound{
-		tcpDialer: &v5DeadlineTestDialer{conn: clientConn},
+		tcpDialer: &lazyPacketTestDialer{conn: clientConn},
 		client:    client,
 	}
-	packetConn := newV5LazyPacketConn(context.Background(), outbound, M.Socksaddr{}, M.Socksaddr{}, false)
+	packetConn := newQUICProxyLazyPacketConn(context.Background(), outbound, M.Socksaddr{}, M.Socksaddr{}, false)
 	t.Cleanup(func() { packetConn.Close() })
 	writeDone := make(chan error, 1)
 	go func() {
@@ -310,15 +384,15 @@ func TestV5LazyPacketConnWriteDeadlineDuringInit(t *testing.T) {
 	}
 }
 
-func TestV5LazyPacketConnCloseDuringInit(t *testing.T) {
+func TestQUICProxyLazyPacketConnCloseDuringInit(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	t.Cleanup(func() { serverConn.Close() })
-	client := &v5DeadlineTestClient{writeStarted: make(chan struct{})}
+	client := &lazyPacketTestClient{writeStarted: make(chan struct{})}
 	outbound := &Outbound{
-		tcpDialer: &v5DeadlineTestDialer{conn: clientConn},
+		tcpDialer: &lazyPacketTestDialer{conn: clientConn},
 		client:    client,
 	}
-	packetConn := newV5LazyPacketConn(context.Background(), outbound, M.Socksaddr{}, M.Socksaddr{}, false)
+	packetConn := newQUICProxyLazyPacketConn(context.Background(), outbound, M.Socksaddr{}, M.Socksaddr{}, false)
 	writeDone := make(chan error, 1)
 	go func() {
 		_, err := packetConn.WriteTo([]byte{1}, M.Socksaddr{})

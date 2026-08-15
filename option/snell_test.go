@@ -75,3 +75,25 @@ func TestSnellOutboundVersionsAndNetwork(t *testing.T) {
 	var v6Options SnellOutboundOptions
 	require.Error(t, json.Unmarshal([]byte(`{"server":"127.0.0.1","server_port":1080,"psk":"password1234","version":6,"obfs_mode":"tls"}`), &v6Options))
 }
+
+func TestSnellV6QUICProxyModeOption(t *testing.T) {
+	var options SnellOutboundOptions
+	require.NoError(t, json.Unmarshal([]byte(`{"server":"127.0.0.1","server_port":1080,"psk":"password1234","version":6,"quic_proxy_mode":true}`), &options))
+	require.True(t, options.V6Options.QUICProxyMode)
+
+	options = SnellOutboundOptions{}
+	require.NoError(t, json.Unmarshal([]byte(`{"server":"127.0.0.1","server_port":1080,"psk":"password1234","version":6}`), &options))
+	require.False(t, options.V6Options.QUICProxyMode)
+
+	options = SnellOutboundOptions{}
+	require.Error(t, json.Unmarshal([]byte(`{"server":"127.0.0.1","server_port":1080,"psk":"password1234","version":5,"quic_proxy_mode":true}`), &options))
+
+	var inboundOptions SnellInboundOptions
+	require.Error(t, json.Unmarshal([]byte(`{"listen":"127.0.0.1","listen_port":1080,"psk":"password1234","version":6,"quic_proxy_mode":true}`), &inboundOptions))
+}
+
+func TestSnellOutboundVersionIsRequired(t *testing.T) {
+	var options SnellOutboundOptions
+	err := json.Unmarshal([]byte(`{"server":"127.0.0.1","server_port":1080,"psk":"password"}`), &options)
+	require.EqualError(t, err, "snell: missing version")
+}

@@ -62,6 +62,10 @@ The Snell protocol version, one of `5` `6`.
 Version `5` supports HTTP obfuscation and QUIC Proxy Mode. Version `6` replaces
 obfuscation with traffic shaping and requires 12 to 255 byte PSKs.
 
+For Surge compatibility, a version `6` inbound also listens on UDP at the Snell
+port and accepts the legacy v5 QUIC Proxy wire format. Standard v6 UDP traffic
+continues to use UDP over TCP.
+
 #### psk
 
 Required in single-user and `userkey` multi-user modes. It must be omitted in

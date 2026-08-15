@@ -84,17 +84,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 			Handler:                 (*inboundHandler)(inbound),
 			MultiUserAuthentication: authentication,
 		}
-		if len(options.Users) > 0 {
-			var service *snellv5.MultiService[int]
-			service, err = snellv5.NewMultiService[int](serviceOptions)
-			if err != nil {
-				return nil, err
-			}
-			err = service.UpdateUsers(userList, keyList)
-			inbound.service = service
-		} else {
-			inbound.service, err = snellv5.NewService(serviceOptions)
-		}
+		inbound.service, err = newSnellV5Service(serviceOptions, userList, keyList)
 	case 6:
 		var mode snellv6.Mode
 		mode, err = snellv6.ParseMode(options.V6Options.Mode)
@@ -126,28 +116,54 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if err != nil {
 		return nil, err
 	}
-	networks := []string{N.NetworkTCP}
+	var quicParser quicProxyInitParser
+	if options.Version == 5 {
+		var loaded bool
+		quicParser, loaded = inbound.service.(quicProxyInitParser)
+		if !loaded {
+			return nil, E.New("snell: version 5 service does not support QUIC proxy init parsing")
+		}
+	} else {
+		quicService, createErr := newSnellV5Service(snellv5.ServiceOptions{
+			PSK:                     []byte(options.PSK),
+			Handler:                 (*inboundHandler)(inbound),
+			MultiUserAuthentication: authentication,
+		}, userList, keyList)
+		if createErr != nil {
+			return nil, E.Cause(createErr, "create Snell v6 QUIC Proxy compatibility service")
+		}
+		var loaded bool
+		quicParser, loaded = quicService.(quicProxyInitParser)
+		if !loaded {
+			return nil, E.New("snell: version 5 service does not support QUIC proxy init parsing")
+		}
+	}
 	listenerOptions := listener.Options{
 		Context:           ctx,
 		Logger:            logger,
-		Network:           networks,
+		Network:           []string{N.NetworkTCP, N.NetworkUDP},
 		Listen:            options.ListenOptions,
 		ConnectionHandler: inbound,
+		PacketHandler:     (*inboundPacketHandler)(inbound),
 	}
-	if options.Version == 5 {
-		networks = append(networks, N.NetworkUDP)
-		listenerOptions.Network = networks
-		listenerOptions.PacketHandler = (*inboundPacketHandler)(inbound)
-		inbound.udpNat = newQUICProxyNATService((*inboundUDPHandler)(inbound), inbound.preparePacketConnection, snellprotocol.QUICProxySessionIdleTimeout)
-		parser, loaded := inbound.service.(quicProxyInitParser)
-		if !loaded {
-			inbound.udpNat.Close()
-			return nil, E.New("snell: version 5 service does not support QUIC proxy init parsing")
-		}
-		inbound.quicAuth = newQUICProxyAuthenticationService(parser, inbound.udpNat, logger)
-	}
+	inbound.udpNat = newQUICProxyNATService((*inboundUDPHandler)(inbound), inbound.preparePacketConnection, snellprotocol.QUICProxySessionIdleTimeout)
+	inbound.quicAuth = newQUICProxyAuthenticationService(quicParser, inbound.udpNat, logger)
 	inbound.listener = listener.New(listenerOptions)
 	return inbound, nil
+}
+
+func newSnellV5Service(options snellv5.ServiceOptions, userList []int, keyList [][]byte) (snellprotocol.Service, error) {
+	if len(userList) == 0 {
+		return snellv5.NewService(options)
+	}
+	service, err := snellv5.NewMultiService[int](options)
+	if err != nil {
+		return nil, err
+	}
+	if err = service.UpdateUsers(userList, keyList); err != nil {
+		return nil, err
+	}
+	return service, nil
 }
 
 func (h *Inbound) Start(stage adapter.StartStage) error {

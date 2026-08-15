@@ -7,13 +7,17 @@ import (
 )
 
 type _SnellInboundOptions struct {
+	Version int `json:"version" enum:"5,6"`
+	AbstractSnellInboundOptions
+	ObfsOptions SnellObfsServerOptions `json:"-"`
+	V6Options   SnellV6Options         `json:"-"`
+}
+
+type AbstractSnellInboundOptions struct {
 	ListenOptions
-	Version                 int                    `json:"version"`
-	PSK                     string                 `json:"psk,omitempty"`
-	Users                   []SnellUser            `json:"users,omitempty"`
-	MultiUserAuthentication string                 `json:"multi_user_authentication,omitempty"`
-	ObfsOptions             SnellObfsServerOptions `json:"-"`
-	V6Options               SnellV6Options         `json:"-"`
+	PSK                     string      `json:"psk,omitempty"`
+	Users                   []SnellUser `json:"users,omitempty"`
+	MultiUserAuthentication string      `json:"multi_user_authentication,omitempty" enum:"userkey,psk"`
 }
 
 type SnellInboundOptions _SnellInboundOptions
@@ -104,15 +108,19 @@ func (o SnellInboundOptions) MarshalJSON() ([]byte, error) {
 }
 
 type _SnellOutboundOptions struct {
+	Version int `json:"version" enum:"1,2,3,4,5,6"`
+	AbstractSnellOutboundOptions
+	ObfsOptions SnellObfsClientOptions `json:"-"`
+	V6Options   SnellV6OutboundOptions `json:"-"`
+}
+
+type AbstractSnellOutboundOptions struct {
 	DialerOptions
 	ServerOptions
-	Version     int                    `json:"version"`
-	PSK         string                 `json:"psk"`
-	UserKey     string                 `json:"userkey,omitempty"`
-	Reuse       bool                   `json:"reuse,omitempty"`
-	Network     NetworkList            `json:"network,omitempty"`
-	ObfsOptions SnellObfsClientOptions `json:"-"`
-	V6Options   SnellV6Options         `json:"-"`
+	PSK     string      `json:"psk"`
+	UserKey string      `json:"userkey,omitempty"`
+	Reuse   bool        `json:"reuse,omitempty"`
+	Network NetworkList `json:"network,omitempty"`
 }
 
 type SnellOutboundOptions _SnellOutboundOptions
@@ -124,10 +132,12 @@ func (o *SnellOutboundOptions) UnmarshalJSON(content []byte) error {
 	}
 	var versionOptions any
 	switch o.Version {
-	case 0, 1, 2, 3, 4, 5:
+	case 1, 2, 3, 4, 5:
 		versionOptions = &o.ObfsOptions
 	case 6:
 		versionOptions = &o.V6Options
+	case 0:
+		return E.New("snell: missing version")
 	default:
 		return E.New("snell: unsupported version: ", o.Version)
 	}
@@ -137,10 +147,12 @@ func (o *SnellOutboundOptions) UnmarshalJSON(content []byte) error {
 func (o SnellOutboundOptions) MarshalJSON() ([]byte, error) {
 	var versionOptions any
 	switch o.Version {
-	case 0, 1, 2, 3, 4, 5:
+	case 1, 2, 3, 4, 5:
 		versionOptions = o.ObfsOptions
 	case 6:
 		versionOptions = o.V6Options
+	case 0:
+		return nil, E.New("snell: missing version")
 	default:
 		return nil, E.New("snell: unsupported version: ", o.Version)
 	}
@@ -148,7 +160,7 @@ func (o SnellOutboundOptions) MarshalJSON() ([]byte, error) {
 }
 
 type SnellObfsServerOptions struct {
-	ObfsMode string `json:"obfs_mode,omitempty"`
+	ObfsMode string `json:"obfs_mode,omitempty" enum:"none,http"`
 }
 
 type SnellUser struct {
@@ -187,10 +199,15 @@ func (u *SnellUser) UnmarshalJSON(content []byte) error {
 }
 
 type SnellObfsClientOptions struct {
-	ObfsMode string `json:"obfs_mode,omitempty"`
+	ObfsMode string `json:"obfs_mode,omitempty" enum:"none,http,tls"`
 	ObfsHost string `json:"obfs_host,omitempty"`
 }
 
 type SnellV6Options struct {
-	Mode string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty" enum:"default,unshaped,unsafe-raw"`
+}
+
+type SnellV6OutboundOptions struct {
+	Mode          string `json:"mode,omitempty" enum:"default,unshaped,unsafe-raw"`
+	QUICProxyMode bool   `json:"quic_proxy_mode,omitempty"`
 }

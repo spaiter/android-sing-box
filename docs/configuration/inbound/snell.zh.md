@@ -62,6 +62,9 @@ Snell 协议版本，`5` `6` 之一。
 版本 `5` 支持 HTTP 混淆与 QUIC Proxy Mode；版本 `6` 以流量整形（`mode`）取而代之，
 并要求 PSK 长度为 12 到 255 字节。
 
+为兼容 Surge，版本 `6` 入站也会在 Snell 端口监听 UDP，并接受旧版 v5 QUIC
+Proxy 线路格式。标准 v6 UDP 流量仍使用 UDP over TCP。
+
 #### psk
 
 单用户模式和 `userkey` 多用户模式下必填；`psk` 多用户模式下必须省略。

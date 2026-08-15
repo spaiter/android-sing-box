@@ -40,6 +40,7 @@ icon: material/new-box
   "reuse": false,
   "network": "tcp",
   "mode": "",
+  "quic_proxy_mode": false,
 
   ... // 拨号字段
 }
@@ -61,7 +62,9 @@ icon: material/new-box
 
 #### version
 
-Snell 协议版本，可选值为 `1` `2` `3` `4` `5` `6`，默认 `4`。
+==必填==
+
+Snell 协议版本，可选值为 `1` `2` `3` `4` `5` `6`。
 
 | 版本 | TCP | UDP |
 |------|-----|-----|
@@ -69,7 +72,7 @@ Snell 协议版本，可选值为 `1` `2` `3` `4` `5` `6`，默认 `4`。
 | 3 | 支持 | UDP over TCP |
 | 4 | 支持 | UDP over TCP |
 | 5 | 支持 | QUIC 使用 QUIC Proxy，其他 UDP 使用 UDP over TCP |
-| 6 | 支持 | UDP over TCP |
+| 6 | 支持 | UDP over TCP；可选 QUIC Proxy 兼容模式 |
 
 v4 与 v5 的 TCP 线路协议完全相同，v5 仅额外启用 QUIC Proxy Mode。
 
@@ -125,6 +128,17 @@ TLS simple-obfs 仅用于兼容旧版 v1-v3，v4/v5 不支持。如需 TLS 流�
 流量整形模式，`default` `unshaped` `unsafe-raw` 之一。
 
 默认为 `default`。
+
+#### quic_proxy_mode
+
+==仅版本 6==
+
+为 QUIC 流量启用旧版 Snell v5 QUIC Proxy Mode，其他 UDP 流量仍使用 Snell v6
+UDP over TCP。
+
+默认关闭。该选项用于兼容在 Snell v6 节点上仍使用 QUIC Proxy Mode 的 Surge
+客户端，标准 Snell v6 协议本身并不支持该模式。服务端必须在 Snell 端口提供
+对应的 UDP listener。
 
 ### 拨号字段
 

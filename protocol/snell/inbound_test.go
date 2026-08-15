@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
 	snellprotocol "github.com/sagernet/sing-snell"
+	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/stretchr/testify/require"
@@ -17,6 +20,111 @@ import (
 func TestValidateSnellInboundObfs(t *testing.T) {
 	require.NoError(t, validateSnellInboundObfs(5, "http"))
 	require.EqualError(t, validateSnellInboundObfs(5, "tls"), "snell: TLS obfs is unsupported for version 5; use ShadowTLS instead")
+}
+
+func TestV6InboundEnablesQUICProxyCompatibility(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		options       option.AbstractSnellInboundOptions
+		clientPSK     []byte
+		clientUserKey []byte
+		expectedUser  int
+		hasUser       bool
+	}{
+		{
+			name:      "single-user",
+			options:   option.AbstractSnellInboundOptions{PSK: "test-password"},
+			clientPSK: []byte("test-password"),
+		},
+		{
+			name: "userkey",
+			options: option.AbstractSnellInboundOptions{
+				PSK:                     "test-password",
+				Users:                   []option.SnellUser{{Name: "alice", UserKey: "alice-key"}},
+				MultiUserAuthentication: "userkey",
+			},
+			clientPSK:     []byte("test-password"),
+			clientUserKey: []byte("alice-key"),
+			expectedUser:  0,
+			hasUser:       true,
+		},
+		{
+			name: "psk",
+			options: option.AbstractSnellInboundOptions{
+				Users:                   []option.SnellUser{{Name: "alice", PSK: "alice-password"}},
+				MultiUserAuthentication: "psk",
+			},
+			clientPSK:     []byte("alice-password"),
+			clientUserKey: []byte("surge-client"),
+			expectedUser:  0,
+			hasUser:       true,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			created, err := NewInbound(
+				context.Background(),
+				nil,
+				log.NewNOPFactory().NewLogger("snell"),
+				"snell-in",
+				option.SnellInboundOptions{
+					Version:                     6,
+					AbstractSnellInboundOptions: testCase.options,
+				},
+			)
+			require.NoError(t, err)
+			inbound := created.(*Inbound)
+			t.Cleanup(func() { require.NoError(t, inbound.Close()) })
+			require.NotNil(t, inbound.udpNat)
+			require.NotNil(t, inbound.quicAuth)
+
+			target := M.ParseSocksaddr("example.com:443")
+			payload := []byte{0xc0, 0, 0, 0, 1, 1}
+			serverConn := new(captureQUICProxyWritesConn)
+			_, err = snellprotocol.NewQUICProxyPacketConn(serverConn, testCase.clientPSK, testCase.clientUserKey, target, payload)
+			require.NoError(t, err)
+			require.Len(t, serverConn.writes, 1)
+			session, decodedPayload, err := inbound.quicAuth.parser.ParseQUICProxyInit(serverConn.writes[0])
+			require.NoError(t, err)
+			require.Equal(t, target, session.Target())
+			require.Equal(t, payload, decodedPayload)
+			user, loaded := auth.UserFromContext[int](session.Context(context.Background()))
+			require.Equal(t, testCase.hasUser, loaded)
+			if testCase.hasUser {
+				require.Equal(t, testCase.expectedUser, user)
+			}
+		})
+	}
+}
+
+func TestSnellInboundStartsQUICProxyListener(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		version int
+	}{
+		{"v5", 5},
+		{"v6", 6},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			created, err := NewInbound(
+				context.Background(),
+				nil,
+				log.NewNOPFactory().NewLogger("snell"),
+				"snell-in",
+				option.SnellInboundOptions{
+					Version: testCase.version,
+					AbstractSnellInboundOptions: option.AbstractSnellInboundOptions{
+						PSK: "test-password",
+					},
+				},
+			)
+			require.NoError(t, err)
+			inbound := created.(*Inbound)
+			t.Cleanup(func() { require.NoError(t, inbound.Close()) })
+			require.NoError(t, inbound.Start(adapter.StartStateStart))
+			require.NotNil(t, inbound.listener.TCPListener())
+			require.NotNil(t, inbound.listener.UDPConn())
+		})
+	}
 }
 
 type blockingQUICProxyInitParser struct {
