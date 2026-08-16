@@ -148,6 +148,7 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	obfsPaddingAccepted := s.options.XPaddingObfsMode && paddingValue != ""
 	sessionId, seqStr := ExtractMetaFromRequest(s.options, request, s.path)
 	if s.options.Mode != "" && s.options.Mode != "auto" {
 		if sessionId == "" {
@@ -233,8 +234,8 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				writer.Header().Set("Cache-Control", "no-store")
 				writer.WriteHeader(http.StatusOK)
 				scStreamUpServerSecs := s.options.GetNormalizedScStreamUpServerSecs()
-				referrer := request.Header.Get("Referer")
-				if referrer != "" && scStreamUpServerSecs.To > 0 {
+				hasLegacyRefererCompatMarker := request.Header.Get("Referer") != ""
+				if (hasLegacyRefererCompatMarker || obfsPaddingAccepted) && scStreamUpServerSecs.To > 0 {
 					go func() {
 						timer := time.NewTimer(0)
 						if !timer.Stop() {
