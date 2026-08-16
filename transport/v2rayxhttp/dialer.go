@@ -18,7 +18,6 @@ import (
 	"github.com/sagernet/sing-box/common/vision"
 	common "github.com/sagernet/sing-box/common/xray"
 	"github.com/sagernet/sing-box/common/xray/buf"
-	"github.com/sagernet/sing-box/common/xray/signal/done"
 	"github.com/sagernet/sing-box/option"
 	E "github.com/sagernet/sing/common/exceptions"
 	"golang.org/x/net/http2"
@@ -94,15 +93,26 @@ func (c *DefaultDialerClient) IsClosed() bool {
 }
 
 func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessionId string, body io.Reader, uploadOnly bool) (wrc io.ReadCloser, remoteAddr, localAddr net.Addr, err error) {
-	gotConn := done.New()
+	type openStreamResult struct {
+		conn       net.Conn
+		remoteAddr net.Addr
+		localAddr  net.Addr
+		err        error
+	}
+	var publishOnce sync.Once
+	result := make(chan openStreamResult, 1)
+	publish := func(res openStreamResult) {
+		publishOnce.Do(func() {
+			result <- res
+		})
+	}
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		GotConn: func(connInfo httptrace.GotConnInfo) {
-			remoteAddr = connInfo.Conn.RemoteAddr()
-			localAddr = connInfo.Conn.LocalAddr()
-			if hook, ok := vision.HookFromContext(ctx); ok {
-				hook(connInfo.Conn)
-			}
-			gotConn.Close()
+			publish(openStreamResult{
+				conn:       connInfo.Conn,
+				remoteAddr: connInfo.Conn.RemoteAddr(),
+				localAddr:  connInfo.Conn.LocalAddr(),
+			})
 		},
 	})
 	method := "GET"
@@ -114,14 +124,13 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessio
 	FillStreamRequest(req, sessionId, "", c.options)
 	wrc = &WaitReadCloser{Wait: make(chan struct{}), Cancel: cancel}
 	go func() {
-		var resp *http.Response
-		resp, err = c.client.Do(req)
-		if err != nil {
-			if !uploadOnly && !errors.Is(err, context.Canceled) { // stream-down is enough
+		resp, errDo := c.client.Do(req)
+		if errDo != nil {
+			if !uploadOnly && !errors.Is(errDo, context.Canceled) { // stream-down is enough
 				c.Close()
 			}
 			cancel()
-			gotConn.Close()
+			publish(openStreamResult{err: errDo})
 			common.Close(body)
 			wrc.Close()
 			return
@@ -139,7 +148,16 @@ func (c *DefaultDialerClient) OpenStream(ctx context.Context, url string, sessio
 		}
 		wrc.(*WaitReadCloser).Set(resp.Body)
 	}()
-	<-gotConn.Wait()
+	res := <-result
+	if res.err != nil {
+		err = res.err
+		return
+	}
+	remoteAddr = res.remoteAddr
+	localAddr = res.localAddr
+	if hook, ok := vision.HookFromContext(ctx); ok {
+		hook(res.conn)
+	}
 	return
 }
 
