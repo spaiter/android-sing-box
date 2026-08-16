@@ -506,13 +506,13 @@ func (m *V2RayXHTTPXmuxOptions) Validate() error {
 }
 
 func (m *V2RayXHTTPXmuxOptions) GetNormalizedMaxConcurrency() Xbadoption.Range {
-	if m.isZero() {
-		return Xbadoption.Range{From: 1, To: 1}
-	}
 	return m.MaxConcurrency
 }
 
 func (m *V2RayXHTTPXmuxOptions) GetNormalizedMaxConnections() Xbadoption.Range {
+	if m.isZero() {
+		return Xbadoption.Range{From: 3, To: 3}
+	}
 	return m.MaxConnections
 }
 
