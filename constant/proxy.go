@@ -37,6 +37,7 @@ const (
 	TypeOOMKiller       = "oom-killer"
 	TypeMASQUE          = "masque"
 	TypeWDTT            = "wdtt"
+	TypeMASQUEWG        = "masque-wg"
 )
 
 const (

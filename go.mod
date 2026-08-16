@@ -94,6 +94,9 @@ require (
 	github.com/pion/logging v0.2.4
 	github.com/pion/transport/v4 v4.0.1
 	github.com/pion/turn/v5 v5.0.2
+	github.com/quic-go/masque-go v0.4.0
+	github.com/quic-go/quic-go v0.60.0
+	github.com/yosida95/uritemplate/v3 v3.0.2
 	lukechampine.com/blake3 v1.3.0
 )
 
@@ -103,6 +106,7 @@ require (
 	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
 	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
 	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
+	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/stun/v3 v3.1.1 // indirect
 	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect

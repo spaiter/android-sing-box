@@ -26,6 +26,9 @@ type DeviceOpts struct {
 	AllowedIps          []netip.Prefix
 	ExcludedIps         []netip.Prefix
 	MTU                 uint32
+	// Bind, if non-nil, overrides the default dial/peerEndpoint bind — used by
+	// masque-wg to run WireGuard over a single MASQUE CONNECT-UDP flow.
+	Bind conn.Bind
 }
 
 type Device struct {
@@ -63,9 +66,13 @@ func NewDevice(ctx context.Context, logger logger.ContextLogger, dial network.Di
 		},
 	}
 
+	devBind := opts.Bind
+	if devBind == nil {
+		devBind = newBind(ctx, dial, opts.PeerEndpoint, opts.Reserved, opts.ReservedForEndpoint)
+	}
 	return &Device{
 		tun:       tun,
-		bind:      newBind(ctx, dial, opts.PeerEndpoint, opts.Reserved, opts.ReservedForEndpoint),
+		bind:      devBind,
 		logger:    awgLogger,
 		ipcConfig: ipcConfig,
 	}, nil
