@@ -12,7 +12,12 @@ import (
 	"time"
 
 	boxtls "github.com/sagernet/sing-box/common/tls"
+	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/json/badoption"
 	M "github.com/sagernet/sing/common/metadata"
+
+	"github.com/stretchr/testify/require"
 
 	"golang.org/x/net/http2"
 )
@@ -216,4 +221,33 @@ func TestDialH2ConnectHopByHopHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	conn.Close()
+}
+
+func newTestHTTPOutboundOptions(tlsOptions *option.OutboundTLSOptions) option.HTTPOutboundOptions {
+	return option.HTTPOutboundOptions{
+		ServerOptions: option.ServerOptions{
+			Server:     "127.0.0.1",
+			ServerPort: 1080,
+		},
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
+			TLS: tlsOptions,
+		},
+	}
+}
+
+func TestOutboundDefaultALPN(t *testing.T) {
+	tlsOptions := &option.OutboundTLSOptions{Enabled: true}
+	_, err := NewOutbound(context.Background(), nil, log.NewNOPFactory().Logger(), "http-out", newTestHTTPOutboundOptions(tlsOptions))
+	require.NoError(t, err)
+	require.Equal(t, badoption.Listable[string]{"h2", "http/1.1"}, tlsOptions.ALPN)
+
+	tlsOptions = &option.OutboundTLSOptions{Enabled: true, ALPN: badoption.Listable[string]{"h3"}}
+	_, err = NewOutbound(context.Background(), nil, log.NewNOPFactory().Logger(), "http-out", newTestHTTPOutboundOptions(tlsOptions))
+	require.NoError(t, err)
+	require.Equal(t, badoption.Listable[string]{"h3"}, tlsOptions.ALPN)
+
+	options := newTestHTTPOutboundOptions(nil)
+	_, err = NewOutbound(context.Background(), nil, log.NewNOPFactory().Logger(), "http-out", options)
+	require.NoError(t, err)
+	require.Nil(t, options.TLS)
 }

@@ -42,6 +42,9 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if err != nil {
 		return nil, err
 	}
+	if options.TLS != nil && options.TLS.Enabled && len(options.TLS.ALPN) == 0 {
+		options.TLS.ALPN = []string{"h2", "http/1.1"}
+	}
 	detour, err := tls.NewDialerFromOptions(ctx, logger, outboundDialer, options.Server, common.PtrValueOrDefault(options.TLS))
 	if err != nil {
 		return nil, err
