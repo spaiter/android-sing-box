@@ -25,13 +25,13 @@ var ErrNeedMoreData = E.New("need more data")
 func Skip(metadata *adapter.InboundContext) bool {
 	// skip server first protocols
 	switch metadata.Destination.Port {
-	case 25, 465, 587:
+	case 25, 587:
 		// SMTP
 		return true
-	case 143, 993:
+	case 143:
 		// IMAP
 		return true
-	case 110, 995:
+	case 110:
 		// POP3
 		return true
 	}
