@@ -143,6 +143,7 @@ func newDoHBootstrapDialer() *net.Dialer {
 	return &net.Dialer{
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
+		Control:   boxCtl(), // bypass our own TUN on Android
 		Resolver: &net.Resolver{
 			PreferGo: false, // системный DNS, не DoH — иначе рекурсия
 		},

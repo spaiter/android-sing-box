@@ -13,7 +13,7 @@ type WDTTOutboundOptions struct {
 	VKHashes      badoption.Listable[string]   `json:"vk_hashes"`
 	DeviceID      string                       `json:"device_id,omitempty"`
 	VKDNS         string                       `json:"vk_dns,omitempty"`  // yandex (default)/cloudflare/google
-	Obfs          string                       `json:"obfs,omitempty"`    // audio (default)/video
+	Obfs          string                       `json:"obfs,omitempty"`    // audio (default)/video/rtpopus2/rtpopus3
 	Workers       int                          `json:"workers,omitempty"` // TURN workers (default 24)
 	MTU           uint32                       `json:"mtu,omitempty"`
 }

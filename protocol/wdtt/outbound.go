@@ -28,6 +28,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/awg"
 	wdttclient "github.com/sagernet/sing-box/transport/wdtt"
+	"github.com/sagernet/sing/common/control"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -78,6 +79,13 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	}
 	serverAddr := net.JoinHostPort(o.options.Server, fmt.Sprint(o.options.ServerPort))
 	o.logger.Info("wdtt: starting VK-TURN bridge to ", serverAddr, " (", len(o.options.VKHashes), " hashes)")
+	// On Android the bridge's bootstrap sockets (VK API/DNS/TURN) must bypass our
+	// own TUN, else they loop into the not-yet-ready tunnel and time out. Source
+	// the platform socket-protect control from the NetworkManager.
+	var bootstrapControl control.Func
+	if nm := service.FromContext[adapter.NetworkManager](o.ctx); nm != nil {
+		bootstrapControl = control.Append(nm.AutoDetectInterfaceFunc(), nm.ProtectFunc())
+	}
 	bridge, err := wdttclient.RunClientBridge(o.ctx, wdttclient.ClientConfig{
 		PeerAddr: serverAddr,
 		Password: o.options.Password,
@@ -86,6 +94,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 		DNS:      o.options.VKDNS,
 		Obfs:     o.options.Obfs,
 		Workers:  o.options.Workers,
+		Control:  bootstrapControl,
 	})
 	if err != nil {
 		return E.Cause(err, "wdtt: bridge")

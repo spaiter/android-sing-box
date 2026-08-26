@@ -95,10 +95,12 @@ func RunSession(
 	if err != nil {
 		return false, fmt.Errorf("резолв TURN: %w", err)
 	}
-	c, err := net.DialUDP("udp", nil, resolved)
+	pd := protectedDialer()
+	rawc, err := pd.DialContext(context.Background(), "udp", resolved.String())
 	if err != nil {
 		return false, fmt.Errorf("подключение TURN UDP: %w", err)
 	}
+	c := rawc.(*net.UDPConn) // bypass our own TUN on Android via protectedDialer
 	defer c.Close()
 	_ = c.SetReadBuffer(socketBufSize)
 	_ = c.SetWriteBuffer(socketBufSize)
@@ -184,12 +186,19 @@ func RunSession(
 
 	useWrap := len(tp.WrapKey) == wrapKeyLen
 
-	// Initialize obfs config per session
+	// Initialize obfs per session: rtpopus2/3 codec, or legacy v1 masking.
 	var obfsCfg *ObfsConfig
 	var obfsWriteState *ObfsState
+	var rc rtpCodec
 	if useWrap {
-		obfsCfg = NewObfsConfig(tp.ObfsMode)
-		obfsWriteState = NewObfsState()
+		var rcErr error
+		if rc, rcErr = newRTPCodec(tp.ObfsMode, tp.WrapKey); rcErr != nil {
+			return false, fmt.Errorf("obfs codec init: %w", rcErr)
+		}
+		if rc == nil {
+			obfsCfg = NewObfsConfig(tp.ObfsMode)
+			obfsWriteState = NewObfsState()
+		}
 	}
 
 	stopRelay := context.AfterFunc(sessCtx, func() {
@@ -217,7 +226,13 @@ func RunSession(
 					log.Printf("[СЕССИЯ #%d] OBFS unwrap: unexpected packet (n=%d)", sessionID, n)
 					continue
 				}
-				m, wrapErr := obfsUnwrapPacket(tp.WrapKey, payload, plain)
+				var m int
+				var wrapErr error
+				if rc != nil {
+					m, wrapErr = rc.unwrap(payload, plain)
+				} else {
+					m, wrapErr = obfsUnwrapPacket(tp.WrapKey, payload, plain)
+				}
 				if wrapErr != nil {
 					log.Printf("[СЕССИЯ #%d] OBFS unwrap: %v (n=%d)", sessionID, wrapErr, n)
 					continue
@@ -245,7 +260,14 @@ func RunSession(
 			}
 			out := b[:n]
 			if useWrap {
-				if obfsCfg != nil && obfsWriteState != nil {
+				if rc != nil {
+					wrapped, wrapErr := rc.wrap(out)
+					if wrapErr != nil {
+						log.Printf("[СЕССИЯ #%d] OBFS wrap: %v", sessionID, wrapErr)
+						return
+					}
+					out = wrapped
+				} else if obfsCfg != nil && obfsWriteState != nil {
 					wrapped, wrapErr := obfsWrapPacket(tp.WrapKey, out, obfsCfg, obfsWriteState)
 					if wrapErr != nil {
 						log.Printf("[СЕССИЯ #%d] OBFS wrap: %v", sessionID, wrapErr)
@@ -476,8 +498,10 @@ func RunPing(
 
 	resolved, err := net.ResolveUDPAddr("udp", turnAddr)
 	if err != nil { return 0, err }
-	c, err := net.DialUDP("udp", nil, resolved)
+	pd := protectedDialer()
+	rawc, err := pd.DialContext(context.Background(), "udp", resolved.String())
 	if err != nil { return 0, err }
+	c := rawc.(*net.UDPConn) // bypass our own TUN on Android via protectedDialer
 	defer c.Close()
 
 	var turnConn net.PacketConn = &connectedUDPConn{c}
@@ -521,9 +545,16 @@ func RunPing(
 	useWrap := len(tp.WrapKey) == wrapKeyLen
 	var obfsCfg *ObfsConfig
 	var obfsWriteState *ObfsState
+	var rc rtpCodec
 	if useWrap {
-		obfsCfg = NewObfsConfig(tp.ObfsMode)
-		obfsWriteState = NewObfsState()
+		var rcErr error
+		if rc, rcErr = newRTPCodec(tp.ObfsMode, tp.WrapKey); rcErr != nil {
+			return 0, fmt.Errorf("obfs codec init: %w", rcErr)
+		}
+		if rc == nil {
+			obfsCfg = NewObfsConfig(tp.ObfsMode)
+			obfsWriteState = NewObfsState()
+		}
 	}
 
 	// relay → pipeA
@@ -538,8 +569,14 @@ func RunPing(
 			payload := buf[:n]
 			if useWrap {
 				if !obfsIsRTPPacket(payload) { continue }
-				m, err := obfsUnwrapPacket(tp.WrapKey, payload, plain)
-				if err != nil { continue }
+				var m int
+				var uErr error
+				if rc != nil {
+					m, uErr = rc.unwrap(payload, plain)
+				} else {
+					m, uErr = obfsUnwrapPacket(tp.WrapKey, payload, plain)
+				}
+				if uErr != nil { continue }
 				payload = plain[:m]
 			}
 			_, _ = pipeA.WriteTo(payload, peer)
@@ -556,8 +593,14 @@ func RunPing(
 			if err != nil { return }
 			out := b[:n]
 			if useWrap {
-				wrapped, err := obfsWrapPacket(tp.WrapKey, out, obfsCfg, obfsWriteState)
-				if err != nil { return }
+				var wrapped []byte
+				var wErr error
+				if rc != nil {
+					wrapped, wErr = rc.wrap(out)
+				} else {
+					wrapped, wErr = obfsWrapPacket(tp.WrapKey, out, obfsCfg, obfsWriteState)
+				}
+				if wErr != nil { return }
 				out = wrapped
 			}
 			_, _ = relay.WriteTo(out, peer)

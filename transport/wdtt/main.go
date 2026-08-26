@@ -84,9 +84,11 @@ func classifyHashCheckError(err error) (string, string) {
 	case strings.Contains(text, "call not found") ||
 		strings.Contains(text, "joinconversationbylink") ||
 		strings.Contains(text, "missing turn_server") ||
+		strings.Contains(text, "invalid join link") ||
+		strings.Contains(text, "error_code=954") ||
 		strings.Contains(text, "9000") ||
 		strings.Contains(text, "callunavailable"):
-		return "dead", "Звонок не найден или закрыт"
+		return "dead", "Звонок не найден/закрыт или ссылка невалидна"
 	case strings.Contains(text, "flood") || strings.Contains(text, "rate limit") || strings.Contains(text, "error_code:29"):
 		return "limited", "VK временно ограничил запросы"
 	case strings.Contains(text, "timeout") || strings.Contains(text, "deadline") || strings.Contains(text, "lookup") || strings.Contains(text, "network"):
@@ -175,7 +177,7 @@ func cliMainUnused() {
 	vkAnonPath := flag.String("vk-anon-path", "vkcalls", "анонимный путь VK TURN (vkcalls/legacy)")
 	vkCredsFile := flag.String("vk-creds-file", "", "файл с TURN кредами от аккаунта VK")
 	goDNS := flag.String("go-dns", "yandex", "DNS для VK (yandex/cloudflare/google, doh-yandex/doh-cloudflare/doh-google, custom:IP или doh:URL)")
-	obfsMode := flag.String("obfs", "audio", "режим обфускации (audio/video)")
+	obfsMode := flag.String("obfs", "audio", "режим обфускации (audio/video/rtpopus2/rtpopus3)")
 	checkHashes := flag.Bool("check-hashes", false, "проверить VK-хеши и выйти")
 
 	flag.Parse()

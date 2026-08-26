@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sagernet/sing/common/control"
 )
 
 // ClientConfig configures one WG-over-VK client bridge.
@@ -24,6 +26,10 @@ type ClientConfig struct {
 	DNS      string   // VK resolver, default "yandex"
 	Obfs     string   // "audio" (default) or "video"
 	Workers  int      // TURN worker count (default 24)
+	// Control, when set (Android), protects the bridge's bootstrap sockets from
+	// our own TUN (bind to underlying interface + VpnService.protect). nil on
+	// server/CLI. Sourced from sing-box's NetworkManager by the outbound.
+	Control control.Func
 }
 
 // ClientHandle is a running bridge. WGConfig holds the WireGuard config the
@@ -69,6 +75,7 @@ func RunClientBridge(parent context.Context, cfg ClientConfig) (*ClientHandle, e
 		cfg.Workers = 24
 	}
 
+	setBoxControl(cfg.Control) // must precede resolver/HTTP/TURN setup so their sockets are protected
 	setupGlobalResolver(cfg.DNS)
 	setCaptchaMode("auto")
 	setVkAuthMode("anonymous")
@@ -164,8 +171,13 @@ func RunClientBridge(parent context.Context, cfg ClientConfig) (*ClientHandle, e
 		}(g+1, isFirst, cc, ids, g, myWaitReady, mySignalReady)
 	}
 
+	// Shut the dispatcher down when the bridge context is cancelled (on Close) —
+	// NOT immediately: Shutdown() cancels the dispatcher's read/write loops, so
+	// calling it here would kill WG-packet forwarding the moment the bridge came
+	// up ("tunnel up but no traffic"; the handshake only squeaked through on a
+	// startup race).
 	h.wg.Add(1)
-	go func() { defer h.wg.Done(); disp.Shutdown() }()
+	go func() { defer h.wg.Done(); <-ctx.Done(); disp.Shutdown() }()
 
 	// wait for the WireGuard config from GETCONF
 	select {

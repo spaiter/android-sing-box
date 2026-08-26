@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	C "github.com/sagernet/sing-box/constant"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
@@ -117,7 +116,13 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-		Timeout: C.TCPTimeout,
+		// 45s (was C.TCPTimeout=15s): give slow censorship-bypass outbounds time to establish
+		// during the probe (WG-over-VK's VK-TURN bridge takes ~15-50s to come up; MASQUE-WG QUIC
+		// ~10s) so URLTest can pick them as an auto-fallback when the direct methods are blocked.
+		// This never slows the fast path — URLTest probes members concurrently and selects the
+		// lowest-latency one as results arrive; the long timeout only bounds how long it waits
+		// for the slow ones before excluding them.
+		Timeout: 45 * time.Second,
 	}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req.WithContext(ctx))

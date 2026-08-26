@@ -381,6 +381,7 @@ func getTokenChain(ctx context.Context, link string, streamID int, creds VKCrede
 		tlsclient.WithTimeoutSeconds(20),
 		tlsclient.WithClientProfile(profiles.Chrome_146),
 		tlsclient.WithCookieJar(jar),
+		tlsclient.WithDialer(protectedDialer()), // bypass our own TUN on Android
 	)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("failed to initialize tls_client: %w", err)
@@ -871,6 +872,7 @@ func setupGlobalResolver(arg string) {
 	dialer := &net.Dialer{
 		Timeout:   3 * time.Second,
 		KeepAlive: 30 * time.Second,
+		Control:   boxCtl(), // bypass our own TUN on Android
 	}
 	servers := goDNSServersForArg(arg)
 	log.Printf(

@@ -72,10 +72,16 @@ func NewObfsConfig(mode string) *ObfsConfig {
 }
 
 func normalizeObfsMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), "video") {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "video":
 		return "video"
+	case "rtpopus2":
+		return "rtpopus2"
+	case "rtpopus3":
+		return "rtpopus3"
+	default:
+		return "audio"
 	}
-	return "audio"
 }
 
 // ─── Per-direction state (sequence + timestamp) ───
