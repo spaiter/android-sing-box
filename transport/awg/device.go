@@ -7,8 +7,8 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/amnezia-vpn/amneziawg-go/conn"
-	"github.com/amnezia-vpn/amneziawg-go/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 
 	"github.com/sagernet/sing-box/adapter"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -93,6 +93,18 @@ func (d *Device) Start(stage adapter.StartStage) error {
 	}
 
 	return d.awgDevice.Up()
+}
+
+// IpcUpdate applies an incremental WireGuard IPC update to the running device.
+// Used to set a peer's endpoint AFTER the device has started, once the peer FQDN
+// can be resolved (i.e. after the Android VpnService/socket-protect is up) — the
+// awg endpoint defers peer-endpoint resolution out of NewEndpoint to avoid the
+// "no VpnService for socket protect" crash during config creation.
+func (d *Device) IpcUpdate(s string) error {
+	if d.awgDevice == nil {
+		return E.New("awg: device not started")
+	}
+	return d.awgDevice.IpcSet(s)
 }
 
 func (d *Device) Close() error {

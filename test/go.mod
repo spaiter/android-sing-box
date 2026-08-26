@@ -10,7 +10,7 @@ replace github.com/sagernet/sing-vmess => ../../sing-vmess
 
 replace github.com/metacubex/sing-shadowsocks2 => github.com/Restia-Ashbell/sing-shadowsocks2 v0.0.0-20250606153500-31ef7b14aaa6
 
-replace github.com/amnezia-vpn/amneziawg-go => ../../amneziawg-go
+replace github.com/amnezia-vpn/amneziawg-go/v3 => ../../amneziawg-go
 
 require (
 	github.com/docker/docker v27.3.1+incompatible
@@ -33,7 +33,7 @@ require (
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
-	github.com/amnezia-vpn/amneziawg-go v1.0.0 // indirect
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/antchfx/htmlquery v1.3.6 // indirect

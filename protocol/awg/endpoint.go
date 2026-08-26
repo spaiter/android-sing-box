@@ -27,6 +27,10 @@ import (
 	"go4.org/netipx"
 )
 
+// Mirrors device.HeaderCipherNonceSize in amneziawg-go/v3: the header cipher
+// takes its nonce out of the S1-S4 padding. //H awg3
+const awgHeaderProtectionMinPadding = 12
+
 func RegisterEndpoint(registry *endpoint.Registry) {
 	endpoint.Register(registry, constant.TypeAwg, NewEndpoint)
 }
@@ -34,6 +38,8 @@ func RegisterEndpoint(registry *endpoint.Registry) {
 type Endpoint struct {
 	*awg.Device
 	endpoint.Adapter
+	ctx       context.Context
+	options   option.AwgEndpointOptions
 	address   []netip.Prefix
 	router    adapter.Router
 	logger    log.ContextLogger
@@ -123,7 +129,10 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 		return nil, err
 	}
 
-	ipc, err := genIpcConfig(options, resolvePeer)
+	// Pass a nil resolver so a domain peer endpoint is NOT resolved here (at
+	// service-creation, before the Android VpnService/socket-protect exists — that
+	// crashes cold-cache clients). It is resolved and applied in Start()/PostStart().
+	ipc, err := genIpcConfig(options, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -147,11 +156,70 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 	return &Endpoint{
 		Device:    dev,
 		Adapter:   endpoint.NewAdapterWithDialerOptions("awg", tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
+		ctx:       ctx,
+		options:   options,
 		address:   options.Address,
 		router:    router,
 		logger:    logger,
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
 	}, nil
+}
+
+// Start delegates lifecycle to the embedded WireGuard device, then — at PostStart,
+// once the Android VpnService/socket-protect is available — resolves any domain peer
+// endpoints (preferring IPv6, since our DS-Lite server has no usable inbound IPv4 for
+// the awg port) and applies them via Device.IpcUpdate. Deferring the resolution here
+// (instead of at NewEndpoint) is what avoids the "no VpnService for socket protect"
+// crash on cold-cache clients while keeping the peer as an auto-following FQDN.
+func (e *Endpoint) Start(stage adapter.StartStage) error {
+	if err := e.Device.Start(stage); err != nil {
+		return err
+	}
+	if stage != adapter.StartStatePostStart {
+		return nil
+	}
+	for _, peer := range e.options.Peers {
+		if peer.Address == "" || peer.Port == 0 {
+			continue
+		}
+		if M.ParseAddr(peer.Address).IsValid() {
+			continue // literal IP: already configured at device start
+		}
+		addr, err := resolvePeerPreferIPv6(e.ctx, peer.Address)
+		if err != nil {
+			e.logger.Warn("awg: deferred resolve of peer ", peer.Address, " failed: ", err)
+			continue
+		}
+		pkBytes, err := base64.StdEncoding.DecodeString(peer.PublicKey)
+		if err != nil {
+			continue
+		}
+		ipc := "public_key=" + hex.EncodeToString(pkBytes) +
+			"\nupdate_only=true\nendpoint=" + formatAWGEndpoint(addr.String(), peer.Port) + "\n"
+		if err := e.Device.IpcUpdate(ipc); err != nil {
+			e.logger.Warn("awg: apply resolved peer endpoint failed: ", err)
+			continue
+		}
+		e.logger.Info("awg: peer ", peer.Address, " -> ", addr.String(), " (resolved post-start)")
+	}
+	return nil
+}
+
+// resolvePeerPreferIPv6 resolves a peer FQDN preferring IPv6 (AAAA), falling back to
+// IPv4. Safe to call at PostStart: the VpnService is up, so the resolver's sockets are
+// protected. On our DS-Lite deployment IPv6 is the reachable path for the awg endpoint.
+func resolvePeerPreferIPv6(ctx context.Context, domain string) (netip.Addr, error) {
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip6", domain)
+	if err != nil || len(addrs) == 0 {
+		addrs, err = net.DefaultResolver.LookupNetIP(ctx, "ip4", domain)
+	}
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if len(addrs) == 0 {
+		return netip.Addr{}, E.New("could not resolve peer: ", domain)
+	}
+	return addrs[0], nil
 }
 
 func resolveClientBindSinglePeerEndpoint(opts option.AwgEndpointOptions, resolvePeer func(domain string) (netip.Addr, error)) (netip.AddrPort, error) {
@@ -325,6 +393,43 @@ func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string
 	if opts.I5 != "" {
 		s += "\ni5=" + opts.I5
 	}
+	// AWG 3.x. The UAPI takes the header protection key as hex, while the
+	// Amnezia .conf spells it base64 — same split as private_key above. //H awg3
+	if opts.HeaderProtectionKey != "" {
+		// Header protection draws its per-packet nonce from the S1-S4 crypto
+		// padding, so anything shorter than the ChaCha20 nonce silently breaks
+		// the handshake instead of erroring out. Fail loudly here.
+		for _, sv := range [][2]any{
+			{"s1", opts.S1}, {"s2", opts.S2}, {"s3", opts.S3}, {"s4", opts.S4},
+		} {
+			if sv[1].(int) < awgHeaderProtectionMinPadding {
+				return "", E.New("awg: header_protection_key requires ", sv[0], " >= ", awgHeaderProtectionMinPadding, ", got ", sv[1])
+			}
+		}
+		headerKeyBytes, err := base64.StdEncoding.DecodeString(opts.HeaderProtectionKey)
+		if err != nil {
+			return "", err
+		}
+		s += "\nheader_protection_key=" + hex.EncodeToString(headerKeyBytes)
+	}
+	for _, kv := range [][2]string{
+		{"content_padding_addition", opts.ContentPaddingAddition},
+		{"rekey_after_time", opts.RekeyAfterTime},
+		{"rekey_timeout", opts.RekeyTimeout},
+		{"reject_after_time", opts.RejectAfterTime},
+		{"keepalive_timeout", opts.KeepaliveTimeout},
+		{"max_handshake_attempts", opts.MaxHandshakeAttempts},
+	} {
+		if kv[1] != "" {
+			s += "\n" + kv[0] + "=" + kv[1]
+		}
+	}
+	if opts.RandomTrailers {
+		s += "\nrandom_trailers=true"
+	}
+	if opts.DisableCookies {
+		s += "\ndisable_cookies=true"
+	}
 
 	for _, peer := range opts.Peers {
 		publicKeyBytes, err := base64.StdEncoding.DecodeString(peer.PublicKey)
@@ -340,20 +445,19 @@ func genIpcConfig(opts option.AwgEndpointOptions, resolvePeer func(domain string
 			s += "\npreshared_key=" + hex.EncodeToString(presharedKeyBytes)
 		}
 		if peer.Address != "" && peer.Port != 0 {
-			// Resolve domain to IP if necessary
-			endpointAddr := peer.Address
-			if addr := M.ParseAddr(peer.Address); !addr.IsValid() {
-				// It's a domain, resolve it
-				if resolvePeer == nil {
-					return "", E.New("peer address is a domain but no resolver provided: ", peer.Address)
-				}
+			if addr := M.ParseAddr(peer.Address); addr.IsValid() {
+				s += "\nendpoint=" + formatAWGEndpoint(peer.Address, peer.Port)
+			} else if resolvePeer != nil {
 				resolvedAddr, resolveErr := resolvePeer(peer.Address)
 				if resolveErr != nil {
 					return "", E.Cause(resolveErr, "resolve peer endpoint ", peer.Address)
 				}
-				endpointAddr = resolvedAddr.String()
+				s += "\nendpoint=" + formatAWGEndpoint(resolvedAddr.String(), peer.Port)
 			}
-			s += "\nendpoint=" + formatAWGEndpoint(endpointAddr, peer.Port)
+			// domain peer with a nil resolver → endpoint DEFERRED: the awg endpoint
+			// (endpoint.go Start/PostStart) resolves it after the VpnService/socket-protect
+			// is up and applies it via Device.IpcUpdate. Resolving here (at NewEndpoint /
+			// "create service") crashes cold-cache Android: "no VpnService for socket protect".
 		}
 		if peer.PersistentKeepaliveInterval != 0 {
 			s += "\npersistent_keepalive_interval=" + format.ToString(peer.PersistentKeepaliveInterval)

@@ -3,7 +3,7 @@ module github.com/sagernet/sing-box
 go 1.25.0
 
 require (
-	github.com/amnezia-vpn/amneziawg-go v1.0.0 // replaced
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814 // replaced
 	github.com/anthropics/anthropic-sdk-go v1.36.0
 	github.com/anytls/sing-anytls v0.0.13
 	github.com/caddyserver/certmagic v0.25.2
@@ -75,7 +75,7 @@ replace github.com/sagernet/sing-snell => github.com/reF1nd/sing-snell v0.0.0-20
 
 replace github.com/metacubex/sing-shadowsocks2 => github.com/Restia-Ashbell/sing-shadowsocks2 v0.0.0-20250606153500-31ef7b14aaa6
 
-replace github.com/amnezia-vpn/amneziawg-go => ../amneziawg-go
+replace github.com/amnezia-vpn/amneziawg-go/v3 => ../amneziawg-go
 
 replace github.com/metacubex/utls => ../utls
 
