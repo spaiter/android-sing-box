@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: MIT
 //
-// Vendored verbatim from samosvalishe/free-turn-proxy
-// (internal/wire/rtpopus3/rtpopus3.go), MIT SPDX. Local additions below the
-// upstream code: IsRTPOpus3 (auto-detect) and UnwrapTo (non-in-place decrypt).
+// Vendored verbatim from the FreeTurn project
+//   copied 2026-08-13 from github.com/samosvalishe/free-turn-proxy, an account
+//   deleted in Oct 2026; the project now lives at
+//   github.com/hackdiaz-dev/free-turn-proxy with this file's MIT header intact.
+//   Licensing caveat recorded in THIRD-PARTY-NOTICES.md: the upstream repository
+//   LICENSE is not plain MIT and names no copyright holder, so this per-file
+//   SPDX grant is the operative one.
+// Upstream path: internal/wire/rtpopus3/rtpopus3.go
+// Upstream has since moved on (perf commit f422acb, 2026-09-21, keeps a ChaCha8
+// stream in the conn instead of per-packet crypto/rand) with no wire-format
+// change, so this copy stays interoperable; it predates that commit.
+// Local additions below the upstream code: IsRTPOpus3 (auto-detect) and
+// UnwrapTo (non-in-place decrypt).
 
 // Package rtpopus3 - wire-профиль обфускации с улучшенной RTP-мимикрией:
 // три one-byte extension (audio-level, transport-wide-cc, abs-send-time),

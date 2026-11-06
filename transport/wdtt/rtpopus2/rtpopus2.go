@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: MIT
 //
-// Vendored verbatim from samosvalishe/free-turn-proxy
-// (internal/wire/rtpopus2/rtpopus2.go), which carries a dedicated MIT SPDX
-// header. Ported into our WDTT (WG-over-VK) stack as a selectable obfuscation
-// profile alongside the legacy v1 RTP masking (transport/wdtt/obfs.go).
+// Vendored verbatim from the FreeTurn project
+//   copied 2026-08-13 from github.com/samosvalishe/free-turn-proxy, an account
+//   deleted in Oct 2026; the project now lives at
+//   github.com/hackdiaz-dev/free-turn-proxy with this file's MIT header intact.
+//   Licensing caveat recorded in THIRD-PARTY-NOTICES.md: the upstream repository
+//   LICENSE is not plain MIT and names no copyright holder, so this per-file
+//   SPDX grant is the operative one.
+// Upstream path: internal/wire/rtpopus2/rtpopus2.go
+// Ported into our WDTT (WG-over-VK) stack as a selectable obfuscation profile
+// alongside the legacy v1 RTP masking (transport/wdtt/obfs.go).
 
 // Package rtpopus2 - wire-профиль обфускации: RTP-заголовок с extension
 // (RFC 8285 one-byte) + ChaCha20-Poly1305 AEAD. Отличие от rtpopus (v1): X=1 с
