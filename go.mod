@@ -227,3 +227,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20231202080848-1f7806d17489 // indirect
 )
+
+// Two upstream libraries carry one bug fix each (ported from hiddify v5):
+// gvisor survives a segment after a failed TCP handshake (public fork, same module
+// path), and wireguard-go reopens its bind after failed handshakes (lab sibling).
+replace github.com/sagernet/gvisor => github.com/spaiter/gvisor v0.0.0-20261106193230-3dd6df2db1b2
+
+replace github.com/sagernet/wireguard-go => ../wireguard-go

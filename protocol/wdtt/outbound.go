@@ -109,6 +109,9 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 		mtu = 1280
 	}
 	peerEndpoint := netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), parsePort(bridge.LocalPort))
+	// WireGuard rides inside RTP inside UDP here: let the kernel fragment rather than
+	// drop packets over the path MTU (same as the WireGuard endpoint)
+	o.options.UDPFragmentDefault = true
 	dial, err := dialer.NewWithOptions(dialer.Options{
 		Context:        o.ctx,
 		Options:        o.options.DialerOptions,
