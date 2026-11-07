@@ -6,8 +6,12 @@ package wdtt
 //	sing-box WG (netstack) -> 127.0.0.1:localPort -> [wdtt bridge: VK-TURN/WRAP/RTP/DTLS]
 //	  -> server -> sing-box wg-wdtt-in -> BitTorrent sniffer -> egress
 //
-// The bridge (anonymous VK mode + auto-captcha) is started lazily at PostStart;
-// the WireGuard config (keys/address) is fetched from the server via GETCONF.
+// The bridge (anonymous VK mode + auto-captcha) is brought up on the first
+// connection, not at start: a bundle that merely lists this node must not keep
+// dozens of TURN legs and their keepalives alive on a phone around the clock.
+// It is torn down again after idle_timeout without connections (default 5m) and
+// comes back on the next dial. The WireGuard config (keys/address) is fetched
+// from the server via GETCONF on each bring-up.
 
 import (
 	"bufio"
@@ -18,11 +22,12 @@ import (
 	"net"
 	"net/netip"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	"github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/lazytunnel"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -47,12 +52,23 @@ type Outbound struct {
 	logger    log.ContextLogger
 	options   option.WDTTOutboundOptions
 	dnsRouter adapter.DNSRouter
-
-	mu      sync.Mutex
-	started bool
-	bridge  *wdttclient.ClientHandle
-	device  *awg.Device
+	tunnel    *lazytunnel.Tunnel[*tunnelHandle]
 }
+
+// tunnelHandle is one running bridge + WireGuard device pair.
+type tunnelHandle struct {
+	bridge *wdttclient.ClientHandle
+	device *awg.Device
+}
+
+func (h *tunnelHandle) Close() error {
+	// Device first: its receive loop reads from the bridge's loopback socket.
+	h.device.Close()
+	h.bridge.Close()
+	return nil
+}
+
+const defaultIdleTimeout = 5 * time.Minute
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.WDTTOutboundOptions) (adapter.Outbound, error) {
 	if options.Server == "" || options.ServerPort == 0 {
@@ -64,19 +80,29 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if len(options.VKHashes) == 0 {
 		return nil, E.New("wdtt: at least one vk_hash is required")
 	}
-	return &Outbound{
+	idle := time.Duration(options.IdleTimeout)
+	if idle == 0 {
+		idle = defaultIdleTimeout
+	}
+	o := &Outbound{
 		Adapter:   outbound.NewAdapterWithDialerOptions(C.TypeWDTT, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
 		ctx:       ctx,
 		logger:    logger,
 		options:   options,
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
-	}, nil
+	}
+	o.tunnel = lazytunnel.New(ctx, logger, "wdtt", idle, o.bringUp)
+	return o, nil
 }
 
 func (o *Outbound) Start(stage adapter.StartStage) error {
-	if stage != adapter.StartStatePostStart {
-		return nil
+	if stage == adapter.StartStatePostStart {
+		o.logger.Info("wdtt: bridge will start on the first connection (idle timeout ", o.tunnel.IdleTimeout(), ")")
 	}
+	return nil
+}
+
+func (o *Outbound) bringUp() (*tunnelHandle, error) {
 	serverAddr := net.JoinHostPort(o.options.Server, fmt.Sprint(o.options.ServerPort))
 	o.logger.Info("wdtt: starting VK-TURN bridge to ", serverAddr, " (", len(o.options.VKHashes), " hashes)")
 	// On Android the bridge's bootstrap sockets (VK API/DNS/TURN) must bypass our
@@ -97,12 +123,12 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 		Control:  bootstrapControl,
 	})
 	if err != nil {
-		return E.Cause(err, "wdtt: bridge")
+		return nil, E.Cause(err, "wdtt: bridge")
 	}
 	priv, pub, addr, err := parseWGConf(bridge.WGConfig)
 	if err != nil {
 		bridge.Close()
-		return E.Cause(err, "wdtt: parse server WireGuard config")
+		return nil, E.Cause(err, "wdtt: parse server WireGuard config")
 	}
 	mtu := o.options.MTU
 	if mtu == 0 {
@@ -119,7 +145,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	})
 	if err != nil {
 		bridge.Close()
-		return err
+		return nil, err
 	}
 	ipc := genPlainWGIpc(priv, pub)
 	dev, err := awg.NewDevice(o.ctx, o.logger, dial, ipc, awg.DeviceOpts{
@@ -130,32 +156,26 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	})
 	if err != nil {
 		bridge.Close()
-		return E.Cause(err, "wdtt: create wireguard device")
+		return nil, E.Cause(err, "wdtt: create wireguard device")
 	}
 	if err := dev.Start(adapter.StartStateStart); err != nil {
 		dev.Close()
 		bridge.Close()
-		return E.Cause(err, "wdtt: start wireguard device")
+		return nil, E.Cause(err, "wdtt: start wireguard device")
 	}
-	o.mu.Lock()
-	o.bridge = bridge
-	o.device = dev
-	o.started = true
-	o.mu.Unlock()
 	o.logger.Info("wdtt: tunnel up (WireGuard over VK-TURN, egress via server ", serverAddr, ")")
-	return nil
-}
-
-func (o *Outbound) ready() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.started
+	return &tunnelHandle{bridge: bridge, device: dev}, nil
 }
 
 func (o *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	if !o.ready() {
+	if err := o.tunnel.EnsureStarted(ctx); err != nil {
+		return nil, E.Cause(err, "wdtt: start")
+	}
+	h, ok := o.tunnel.Handle()
+	if !ok {
 		return nil, E.New("wdtt: not started")
 	}
+	dev := h.device
 	o.logger.InfoContext(ctx, "outbound connection to ", destination)
 	if destination.IsFqdn() {
 		if o.dnsRouter == nil {
@@ -165,15 +185,20 @@ func (o *Outbound) DialContext(ctx context.Context, network string, destination 
 		if err != nil {
 			return nil, err
 		}
-		return N.DialSerial(ctx, o.device, network, destination, addrs)
+		return o.tunnel.Track(N.DialSerial(ctx, dev, network, destination, addrs))
 	}
-	return o.device.DialContext(ctx, network, destination)
+	return o.tunnel.Track(dev.DialContext(ctx, network, destination))
 }
 
 func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if !o.ready() {
+	if err := o.tunnel.EnsureStarted(ctx); err != nil {
+		return nil, E.Cause(err, "wdtt: start")
+	}
+	h, ok := o.tunnel.Handle()
+	if !ok {
 		return nil, E.New("wdtt: not started")
 	}
+	dev := h.device
 	o.logger.InfoContext(ctx, "outbound packet connection to ", destination)
 	if destination.IsFqdn() {
 		if o.dnsRouter == nil {
@@ -183,27 +208,14 @@ func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		if err != nil {
 			return nil, err
 		}
-		conn, _, err := N.ListenSerial(ctx, o.device, destination, addrs)
-		return conn, err
+		conn, _, err := N.ListenSerial(ctx, dev, destination, addrs)
+		return o.tunnel.TrackPacket(conn, err)
 	}
-	return o.device.ListenPacket(ctx, destination)
+	return o.tunnel.TrackPacket(dev.ListenPacket(ctx, destination))
 }
 
 func (o *Outbound) Close() error {
-	o.mu.Lock()
-	dev := o.device
-	bridge := o.bridge
-	o.started = false
-	o.device = nil
-	o.bridge = nil
-	o.mu.Unlock()
-	if dev != nil {
-		dev.Close()
-	}
-	if bridge != nil {
-		bridge.Close()
-	}
-	return nil
+	return o.tunnel.Close()
 }
 
 // parseWGConf extracts PrivateKey, peer PublicKey and the client Address from a
@@ -248,7 +260,8 @@ func genPlainWGIpc(privB64, pubB64 string) string {
 	fmt.Fprintf(&b, "private_key=%s", hex.EncodeToString(priv))
 	fmt.Fprintf(&b, "\npublic_key=%s", hex.EncodeToString(pub))
 	b.WriteString("\nendpoint=127.0.0.1:1") // placeholder; PeerEndpoint bind supplies the real one
-	b.WriteString("\npersistent_keepalive_interval=25")
+	// No WireGuard keepalive: the bridge keeps its TURN/DTLS legs alive itself and
+	// the peer is loopback, so there is no NAT mapping to refresh.
 	b.WriteString("\nallowed_ip=0.0.0.0/0")
 	b.WriteString("\nallowed_ip=::/0")
 	return b.String()

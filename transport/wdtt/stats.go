@@ -16,21 +16,26 @@ func NewStats() *Stats {
 	return &Stats{}
 }
 
+// RunLoop logs the counters once a minute, and only while something moved: a
+// line every three seconds kept the log writer (and the phone) busy for nothing.
 func (s *Stats) RunLoop(shutdown <-chan struct{}) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
+	var lastUp, lastDown int64
 	for {
 		select {
 		case <-shutdown:
 			return
 		case <-ticker.C:
-			active := s.ActiveConnections.Load()
 			up := s.TotalBytesUp.Load()
 			down := s.TotalBytesDown.Load()
+			if up == lastUp && down == lastDown {
+				continue
+			}
+			lastUp, lastDown = up, down
 			totalMB := float64(up+down) / (1024.0 * 1024.0)
-
-			log.Printf("[СТАТИСТИКА] Активных: %d | Трафик: %.2f МБ", active, totalMB)
+			log.Printf("[wdtt] active=%d traffic=%.2f MB", s.ActiveConnections.Load(), totalMB)
 		}
 	}
 }

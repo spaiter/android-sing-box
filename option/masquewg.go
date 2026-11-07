@@ -42,7 +42,10 @@ type MASQUEWGOutboundOptions struct {
 	PeerPublicKey               string                           `json:"peer_public_key"`
 	PreSharedKey                string                           `json:"pre_shared_key,omitempty"`
 	LocalAddress                badoption.Listable[netip.Prefix] `json:"local_address"` // client tunnel IPs, e.g. ["10.10.0.5/32"]
-	MTU                         uint32                           `json:"mtu,omitempty"`  // default 1280 (room under MASQUE/QUIC)
+	MTU                         uint32                           `json:"mtu,omitempty"` // default 1280 (room under MASQUE/QUIC)
 	PersistentKeepaliveInterval uint16                           `json:"persistent_keepalive_interval,omitempty"`
-	Awg                         AwgOptions                       `json:"awg,omitempty"`
+	// IdleTimeout: tear the MASQUE flow + WG device down after this long without
+	// connections; they come back on the next dial. Default 2m.
+	IdleTimeout badoption.Duration `json:"idle_timeout,omitempty"`
+	Awg         AwgOptions         `json:"awg,omitempty"`
 }

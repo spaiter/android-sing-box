@@ -8,12 +8,15 @@ import "github.com/sagernet/sing/common/json/badoption"
 // and runs an embedded WireGuard device over the bridge. Requires our fork core.
 type WDTTOutboundOptions struct {
 	DialerOptions
-	ServerOptions                              // wdtt DTLS server (host + port)
-	Password      string                       `json:"password"`
-	VKHashes      badoption.Listable[string]   `json:"vk_hashes"`
-	DeviceID      string                       `json:"device_id,omitempty"`
-	VKDNS         string                       `json:"vk_dns,omitempty"`  // yandex (default)/cloudflare/google
-	Obfs          string                       `json:"obfs,omitempty"`    // audio (default)/video/rtpopus2/rtpopus3
-	Workers       int                          `json:"workers,omitempty"` // TURN workers (default 24)
-	MTU           uint32                       `json:"mtu,omitempty"`
+	ServerOptions                            // wdtt DTLS server (host + port)
+	Password      string                     `json:"password"`
+	VKHashes      badoption.Listable[string] `json:"vk_hashes"`
+	DeviceID      string                     `json:"device_id,omitempty"`
+	VKDNS         string                     `json:"vk_dns,omitempty"`  // yandex (default)/cloudflare/google
+	Obfs          string                     `json:"obfs,omitempty"`    // audio (default)/video/rtpopus2/rtpopus3
+	Workers       int                        `json:"workers,omitempty"` // TURN workers (default 24)
+	MTU           uint32                     `json:"mtu,omitempty"`
+	// IdleTimeout is how long the tunnel may sit without connections before the
+	// bridge is torn down (default 5m); it comes back on the next dial.
+	IdleTimeout badoption.Duration `json:"idle_timeout,omitempty"`
 }

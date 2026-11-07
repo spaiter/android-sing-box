@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/quic-go/masque-go"
 	qgo "github.com/quic-go/quic-go"
@@ -18,6 +19,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"
 	sbdialer "github.com/sagernet/sing-box/common/dialer"
+	"github.com/sagernet/sing-box/common/lazytunnel"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -46,15 +48,42 @@ type Outbound struct {
 	template   *uritemplate.Template
 	tlsConfig  *tls.Config
 	dialer     N.Dialer
-	bind       *masqueBind
-	device     *awg.Device
+	ipc        string
+	mtu        uint32
 	dnsRouter  adapter.DNSRouter
+	tunnel     *lazytunnel.Tunnel[*tunnelHandle]
+}
 
-	mu              sync.Mutex
-	started         bool
+// tunnelHandle is one established MASQUE flow with its WireGuard device.
+type tunnelHandle struct {
+	device          *awg.Device
 	conn            *masque.Conn
 	outerPacketConn net.PacketConn
 }
+
+func (h *tunnelHandle) Close() error {
+	// Close the MASQUE flow BEFORE dev.Close(). The WireGuard receive goroutine is
+	// blocked in a plain pc.ReadFrom (see bind.go recv), and masqueBind.Close() is a
+	// no-op by design (so IpcSet/Up rebind doesn't lose the flow). If we closed the
+	// device first it would wait forever for that goroutine, which only returns once
+	// the flow's ReadFrom errors out — i.e. after conn.Close(). Closing conn first
+	// unblocks ReadFrom (net.ErrClosed), the routine exits, and dev.Close() returns
+	// promptly instead of hitting the box's "did not close in time" timeout.
+	if h.conn != nil {
+		h.conn.Close()
+	}
+	if h.outerPacketConn != nil {
+		h.outerPacketConn.Close()
+	}
+	if h.device != nil {
+		h.device.Close()
+	}
+	return nil
+}
+
+// defaultIdleTimeout: re-establishing MASQUE+WG costs two handshakes, so a short
+// idle window is cheap; it mostly matters for the unselected-node case.
+const defaultIdleTimeout = 2 * time.Minute
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MASQUEWGOutboundOptions) (adapter.Outbound, error) {
 	if options.Server == "" || options.ServerPort == 0 {
@@ -94,17 +123,12 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	if mtu == 0 {
 		mtu = 1280
 	}
-	bind := newMasqueBind()
-	dev, err := awg.NewDevice(ctx, logger, nil, ipc, awg.DeviceOpts{
-		Address: options.LocalAddress,
-		MTU:     mtu,
-		Bind:    bind,
-	})
-	if err != nil {
-		return nil, E.Cause(err, "masque-wg: create device")
+	idle := time.Duration(options.IdleTimeout)
+	if idle == 0 {
+		idle = defaultIdleTimeout
 	}
 
-	return &Outbound{
+	o := &Outbound{
 		Adapter:    outbound.NewAdapterWithDialerOptions(C.TypeMASQUEWG, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.DialerOptions),
 		ctx:        ctx,
 		logger:     logger,
@@ -118,13 +142,22 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			InsecureSkipVerify: insecure,
 		},
 		dialer:    outerDialer,
-		bind:      bind,
-		device:    dev,
+		ipc:       ipc,
+		mtu:       mtu,
 		dnsRouter: service.FromContext[adapter.DNSRouter](ctx),
-	}, nil
+	}
+	o.tunnel = lazytunnel.New(ctx, logger, "masque-wg", idle, o.bringUp)
+	return o, nil
 }
 
+// PostStart only announces the lazy mode; the MASQUE flow and the WireGuard
+// device come up on the first connection and go away after idle_timeout.
 func (o *Outbound) PostStart() error {
+	o.logger.Info("masque-wg: tunnel will start on the first connection (idle timeout ", o.tunnel.IdleTimeout(), ")")
+	return nil
+}
+
+func (o *Outbound) bringUp() (*tunnelHandle, error) {
 	// Prefer IPv4 for the QUIC dial: the server sits behind a firewall that only
 	// forwards this UDP port over IPv4 (inbound IPv6 is dropped), so following an
 	// AAAA record would time out. TLS ServerName stays the hostname for cert
@@ -135,6 +168,27 @@ func (o *Outbound) PostStart() error {
 			dialAddr = net.JoinHostPort(ips[0].String(), port)
 			o.logger.Info("masque-wg: resolved ", host, " -> ", ips[0].String(), " (forcing IPv4)")
 		}
+	}
+	bind := newMasqueBind()
+	dev, err := awg.NewDevice(o.ctx, o.logger, nil, o.ipc, awg.DeviceOpts{
+		Address: o.options.LocalAddress,
+		MTU:     o.mtu,
+		Bind:    bind,
+	})
+	if err != nil {
+		return nil, E.Cause(err, "masque-wg: create device")
+	}
+	var outerMu sync.Mutex
+	var outerPacketConn net.PacketConn
+	fail := func(err error) (*tunnelHandle, error) {
+		outerMu.Lock()
+		pc := outerPacketConn
+		outerMu.Unlock()
+		if pc != nil {
+			pc.Close()
+		}
+		dev.Close()
+		return nil, err
 	}
 	tr := &masque.Transport{
 		TLSClientConfig: o.tlsConfig,
@@ -158,9 +212,9 @@ func (o *Outbound) PostStart() error {
 				packetConn.Close()
 				return nil, err
 			}
-			o.mu.Lock()
-			o.outerPacketConn = packetConn
-			o.mu.Unlock()
+			outerMu.Lock()
+			outerPacketConn = packetConn
+			outerMu.Unlock()
 			return conn, nil
 		},
 	}
@@ -168,38 +222,37 @@ func (o *Outbound) PostStart() error {
 	// target here is only used to expand the URI template; any valid host:port works.
 	req, err := masque.NewRequest(o.ctx, o.template, "127.0.0.1:10863")
 	if err != nil {
-		return E.Cause(err, "masque-wg: build request")
+		return fail(E.Cause(err, "masque-wg: build request"))
 	}
 	pconn, rsp, err := tr.Dial(req)
 	if err != nil {
-		return E.Cause(err, "masque-wg: establish CONNECT-UDP")
+		return fail(E.Cause(err, "masque-wg: establish CONNECT-UDP"))
 	}
 	if pconn == nil {
-		return E.New("masque-wg: dial returned nil conn")
+		return fail(E.New("masque-wg: dial returned nil conn"))
 	}
 	if rsp != nil && rsp.StatusCode/100 != 2 {
-		return E.New("masque-wg: proxy rejected CONNECT-UDP, status ", rsp.StatusCode)
+		pconn.Close()
+		return fail(E.New("masque-wg: proxy rejected CONNECT-UDP, status ", rsp.StatusCode))
 	}
-	o.bind.SetConn(pconn)
-	if err := o.device.Start(adapter.StartStateStart); err != nil {
-		return E.Cause(err, "masque-wg: start wireguard device")
+	bind.SetConn(pconn)
+	if err := dev.Start(adapter.StartStateStart); err != nil {
+		pconn.Close()
+		return fail(E.Cause(err, "masque-wg: start wireguard device"))
 	}
-	o.mu.Lock()
-	o.conn = pconn
-	o.started = true
-	o.mu.Unlock()
+	outerMu.Lock()
+	pc := outerPacketConn
+	outerMu.Unlock()
 	o.logger.Info("masque-wg: tunnel up (WireGuard over MASQUE CONNECT-UDP to ", o.serverAddr, ")")
-	return nil
-}
-
-func (o *Outbound) ready() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.started
+	return &tunnelHandle{device: dev, conn: pconn, outerPacketConn: pc}, nil
 }
 
 func (o *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	if !o.ready() {
+	if err := o.tunnel.EnsureStarted(ctx); err != nil {
+		return nil, E.Cause(err, "masque-wg: start")
+	}
+	h, ok := o.tunnel.Handle()
+	if !ok {
 		return nil, E.New("masque-wg: not started")
 	}
 	// The embedded netstack cannot resolve names itself; resolve FQDNs via
@@ -212,13 +265,17 @@ func (o *Outbound) DialContext(ctx context.Context, network string, destination 
 		if err != nil {
 			return nil, err
 		}
-		return N.DialSerial(ctx, o.device, network, destination, addrs)
+		return o.tunnel.Track(N.DialSerial(ctx, h.device, network, destination, addrs))
 	}
-	return o.device.DialContext(ctx, network, destination)
+	return o.tunnel.Track(h.device.DialContext(ctx, network, destination))
 }
 
 func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	if !o.ready() {
+	if err := o.tunnel.EnsureStarted(ctx); err != nil {
+		return nil, E.Cause(err, "masque-wg: start")
+	}
+	h, ok := o.tunnel.Handle()
+	if !ok {
 		return nil, E.New("masque-wg: not started")
 	}
 	if destination.IsFqdn() {
@@ -229,38 +286,14 @@ func (o *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		if err != nil {
 			return nil, err
 		}
-		conn, _, err := N.ListenSerial(ctx, o.device, destination, addrs)
-		return conn, err
+		conn, _, err := N.ListenSerial(ctx, h.device, destination, addrs)
+		return o.tunnel.TrackPacket(conn, err)
 	}
-	return o.device.ListenPacket(ctx, destination)
+	return o.tunnel.TrackPacket(h.device.ListenPacket(ctx, destination))
 }
 
 func (o *Outbound) Close() error {
-	o.mu.Lock()
-	dev := o.device
-	conn := o.conn
-	outerPacketConn := o.outerPacketConn
-	o.started = false
-	o.conn = nil
-	o.outerPacketConn = nil
-	o.mu.Unlock()
-	// Close the MASQUE flow BEFORE dev.Close(). The WireGuard receive goroutine is
-	// blocked in a plain pc.ReadFrom (see bind.go recv), and masqueBind.Close() is a
-	// no-op by design (so IpcSet/Up rebind doesn't lose the flow). If we closed the
-	// device first it would wait forever for that goroutine, which only returns once
-	// the flow's ReadFrom errors out — i.e. after conn.Close(). Closing conn first
-	// unblocks ReadFrom (net.ErrClosed), the routine exits, and dev.Close() returns
-	// promptly instead of hitting the box's "did not close in time" timeout.
-	if conn != nil {
-		conn.Close()
-	}
-	if outerPacketConn != nil {
-		outerPacketConn.Close()
-	}
-	if dev != nil {
-		dev.Close()
-	}
-	return nil
+	return o.tunnel.Close()
 }
 
 // genIpc renders the WireGuard/AmneziaWG IPC config for the embedded device. The
