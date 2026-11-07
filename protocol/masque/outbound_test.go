@@ -1,6 +1,7 @@
 package masque
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -42,5 +43,29 @@ func TestResolveTransportOptions(t *testing.T) {
 				t.Fatalf("got (%q, %d, %s), want (%q, %d, %s)", transport, mtu, timeout, test.wantTransport, test.wantMTU, test.wantTimeout)
 			}
 		})
+	}
+}
+
+// Box.Start can fail before PostStart and then Close every outbound; an outbound
+// whose handler never ran must not wait for an initialization that never comes.
+func TestCloseBeforeStartReturns(t *testing.T) {
+	adapterOut, err := NewOutbound(context.Background(), nil, nil, "masque", option.MASQUEOutboundOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := adapterOut.(*Outbound)
+	done := make(chan error, 1)
+	go func() { done <- out.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close blocked on an outbound that was never started")
+	}
+	// Idempotent.
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"github.com/goccy/go-json"
 	"net"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -53,7 +55,19 @@ type Outbound struct {
 	initErr      error
 
 	await chan struct{}
+	// started flips when Start launched the handler; Close on an outbound whose
+	// Box never reached PostStart (start failed earlier) has nothing to wait for.
+	started atomic.Bool
+	closeMu sync.Mutex
+	closed  bool
+	// tearDown closes the tunnel exactly once, whichever of Close and the
+	// handler (when Close came in mid-initialization) gets there.
+	tearDown sync.Once
 }
+
+// closeInitWait bounds how long Close waits for an in-flight initialization
+// before leaving the tunnel for the handler to tear down itself.
+const closeInitWait = 5 * time.Second
 
 func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.MASQUEOutboundOptions) (adapter.Outbound, error) {
 	transport, mtu, fallbackTimeout, err := resolveTransportOptions(options)
@@ -204,10 +218,19 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 		outbound.tunnel = tunnel
 		if err = outbound.tunnel.Start(false); err != nil {
 			fail(err)
+			outbound.closeTunnel()
 			return
 		}
 		if err = outbound.tunnel.Start(true); err != nil {
 			fail(err)
+			outbound.closeTunnel()
+			return
+		}
+		outbound.closeMu.Lock()
+		closed := outbound.closed
+		outbound.closeMu.Unlock()
+		if closed {
+			outbound.closeTunnel()
 		}
 	}
 	return outbound, nil
@@ -251,15 +274,35 @@ func (w *Outbound) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStatePostStart {
 		return nil
 	}
+	w.started.Store(true)
 	go w.startHandler()
 	return nil
 }
 
 func (w *Outbound) Close() error {
-	if err := w.isTunnelInitialized(w.ctx); err != nil {
-		return err
+	w.closeMu.Lock()
+	alreadyClosed := w.closed
+	w.closed = true
+	w.closeMu.Unlock()
+	if alreadyClosed || !w.started.Load() {
+		return nil
 	}
-	return w.tunnel.Close()
+	select {
+	case <-w.await:
+	case <-time.After(closeInitWait):
+		// Still registering or connecting: the handler sees closed and tears down.
+		return nil
+	}
+	return w.closeTunnel()
+}
+
+func (w *Outbound) closeTunnel() (err error) {
+	w.tearDown.Do(func() {
+		if w.tunnel != nil {
+			err = w.tunnel.Close()
+		}
+	})
+	return err
 }
 
 func (w *Outbound) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
