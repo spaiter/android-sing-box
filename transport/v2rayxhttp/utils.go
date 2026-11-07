@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 
+	"github.com/sagernet/sing-box/common/xray/buf"
 	"github.com/sagernet/sing-box/common/xray/utils"
 	"github.com/sagernet/sing-box/common/xray/uuid"
 	"github.com/sagernet/sing-box/option"
@@ -70,17 +71,16 @@ func FillStreamRequest(request *http.Request, sessionId string, seqStr string, o
 	}
 }
 
-func FillPacketRequest(request *http.Request, sessionId string, seqStr string, body io.Reader, contentLength int64, options *option.V2RayXHTTPBaseOptions) error {
+func FillPacketRequest(request *http.Request, sessionId string, seqStr string, payload buf.MultiBuffer, options *option.V2RayXHTTPBaseOptions) error {
 	dataPlacement := options.GetNormalizedUplinkDataPlacement()
 	if dataPlacement == option.PlacementBody || dataPlacement == option.PlacementAuto {
 		request.Header = options.GetRequestHeader()
-		request.Body = asReadCloser(body)
-		request.ContentLength = contentLength
+		request.Body = io.NopCloser(&buf.MultiBufferContainer{MultiBuffer: payload})
+		request.ContentLength = int64(payload.Len())
 	} else {
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return err
-		}
+		data := make([]byte, payload.Len())
+		payload.Copy(data)
+		buf.ReleaseMulti(payload)
 		switch dataPlacement {
 		case option.PlacementHeader:
 			request.Header = GetRequestHeaderWithPayload(data, options)
@@ -112,13 +112,6 @@ func FillPacketRequest(request *http.Request, sessionId string, seqStr string, b
 	ApplyXPaddingToRequest(request, config)
 	ApplyMetaToRequest(options, request, sessionId, seqStr)
 	return nil
-}
-
-func asReadCloser(reader io.Reader) io.ReadCloser {
-	if readCloser, ok := reader.(io.ReadCloser); ok {
-		return readCloser
-	}
-	return io.NopCloser(reader)
 }
 
 func WriteResponseHeader(writer http.ResponseWriter, requestMethod string, requestHeader http.Header, options *option.V2RayXHTTPOptions) {
@@ -162,9 +155,8 @@ func GetRequestHeader(options *option.V2RayXHTTPBaseOptions) http.Header {
 
 func GetRequestHeaderWithPayload(payload []byte, options *option.V2RayXHTTPBaseOptions) http.Header {
 	header := GetRequestHeader(options)
-	key := options.GetNormalizedUplinkDataKey()
+	key := options.UplinkDataKey
 	encodedData := base64.RawURLEncoding.EncodeToString(payload)
-	encodedDataLength := len(encodedData)
 	for i := 0; len(encodedData) > 0; i++ {
 		chunkSize := min(int(options.GetNormalizedUplinkChunkSize().Rand()), len(encodedData))
 		chunk := encodedData[:chunkSize]
@@ -172,15 +164,13 @@ func GetRequestHeaderWithPayload(payload []byte, options *option.V2RayXHTTPBaseO
 		headerKey := fmt.Sprintf("%s-%d", key, i)
 		header.Set(headerKey, chunk)
 	}
-	header.Set(key+"-Length", fmt.Sprintf("%d", encodedDataLength))
-	header.Set(key+"-Upstream", "1")
 
 	return header
 }
 
 func GetRequestCookiesWithPayload(payload []byte, options *option.V2RayXHTTPBaseOptions) []*http.Cookie {
 	cookies := []*http.Cookie{}
-	key := options.GetNormalizedUplinkDataKey()
+	key := options.UplinkDataKey
 	encodedData := base64.RawURLEncoding.EncodeToString(payload)
 	for i := 0; len(encodedData) > 0; i++ {
 		chunkSize := min(int(options.GetNormalizedUplinkChunkSize().Rand()), len(encodedData))
@@ -189,6 +179,5 @@ func GetRequestCookiesWithPayload(payload []byte, options *option.V2RayXHTTPBase
 		cookieName := fmt.Sprintf("%s_%d", key, i)
 		cookies = append(cookies, &http.Cookie{Name: cookieName, Value: chunk})
 	}
-	cookies = append(cookies, &http.Cookie{Name: key + "_upstream", Value: "1"})
 	return cookies
 }

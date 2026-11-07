@@ -134,7 +134,7 @@ func NewClient(ctx context.Context, dialer N.Dialer, serverAddr M.Socksaddr, opt
 		downloadDest = &dest2
 		var tlsConfig2 tls.Config
 		if options2.TLS != nil {
-			tlsConfig2, err = tls.NewClient(ctx, options2.Server, common.PtrValueOrDefault(options2.TLS))
+			tlsConfig2, err = tls.NewClient(ctx, log.StdLogger(), options2.Server, common.PtrValueOrDefault(options2.TLS))
 			if err != nil {
 				return nil, err
 			}
@@ -461,7 +461,7 @@ func createHTTPClient(ctx context.Context, dest M.Socksaddr, dialer N.Dialer, op
 		}
 		transport = &http3.Transport{
 			QUICConfig: quicConfig,
-			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+			Dial: func(ctx context.Context, addr string, tlsCfg *gotls.Config, cfg *quic.Config) (*quic.Conn, error) {
 				udpConn, dErr := dialer.DialContext(ctx, N.NetworkUDP, dest)
 				if dErr != nil {
 					return nil, dErr

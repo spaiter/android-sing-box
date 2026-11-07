@@ -34,10 +34,7 @@ func isValidHTTPHost(request string, config string) bool {
 	r := strings.ToLower(request)
 	c := strings.ToLower(config)
 	if strings.Contains(r, ":") {
-		h, _, err := net.SplitHostPort(r)
-		if err != nil {
-			return false
-		}
+		h, _, _ := net.SplitHostPort(r)
 		return h == c
 	}
 	return r == c

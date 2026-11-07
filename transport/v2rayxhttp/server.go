@@ -98,7 +98,7 @@ func NewServer(ctx context.Context, logger logger.ContextLogger, options option.
 		}
 		server.http3Server = &http3.Server{
 			Handler: server,
-			ConnContext: func(ctx context.Context, conn quic.Connection) context.Context {
+			ConnContext: func(ctx context.Context, conn *quic.Conn) context.Context {
 				if congestionControlFactory != nil {
 					conn.SetCongestionControl(congestionControlFactory(conn))
 				}

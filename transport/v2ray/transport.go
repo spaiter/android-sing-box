@@ -69,7 +69,7 @@ func NewClientTransport(ctx context.Context, logger logger.ContextLogger, dialer
 	case C.V2RayTransportTypeHTTPUpgrade:
 		return v2rayhttpupgrade.NewClient(ctx, dialer, serverAddr, options.HTTPUpgradeOptions, tlsConfig)
 	case C.V2RayTransportTypeXHTTP:
-		return xhttp.NewClient(ctx, logger, dialer, serverAddr, options.XHTTPOptions, tlsConfig)
+		return xhttp.NewClient(ctx, dialer, serverAddr, options.XHTTPOptions, tlsConfig)
 	case C.V2RayTransportTypeKCP:
 		return v2raykcp.NewClient(ctx, dialer, serverAddr, options.KCPOptions, tlsConfig)
 	default:

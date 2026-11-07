@@ -10,7 +10,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
-func NewCongestionControl(name string, cwnd int, timeFunc func() time.Time) (func(conn quic.Connection) qcongestion.CongestionControl, error) {
+func NewCongestionControl(name string, cwnd int, timeFunc func() time.Time) (func(conn *quic.Conn) qcongestion.CongestionControl, error) {
 	if timeFunc == nil {
 		timeFunc = time.Now
 	}
@@ -19,7 +19,7 @@ func NewCongestionControl(name string, cwnd int, timeFunc func() time.Time) (fun
 	}
 	switch name {
 	case "", "bbr":
-		return func(conn quic.Connection) qcongestion.CongestionControl {
+		return func(conn *quic.Conn) qcongestion.CongestionControl {
 			return congestion_meta2.NewBbrSender(
 				congestion_meta2.DefaultClock{TimeFunc: timeFunc},
 				qcongestion.ByteCount(conn.Config().InitialPacketSize),
@@ -27,21 +27,19 @@ func NewCongestionControl(name string, cwnd int, timeFunc func() time.Time) (fun
 			)
 		}, nil
 	case "cubic":
-		return func(conn quic.Connection) qcongestion.CongestionControl {
+		return func(conn *quic.Conn) qcongestion.CongestionControl {
 			return congestion_meta1.NewCubicSender(
 				congestion_meta1.DefaultClock{TimeFunc: timeFunc},
 				qcongestion.ByteCount(conn.Config().InitialPacketSize),
 				false,
-				nil,
 			)
 		}, nil
 	case "reno":
-		return func(conn quic.Connection) qcongestion.CongestionControl {
+		return func(conn *quic.Conn) qcongestion.CongestionControl {
 			return congestion_meta1.NewCubicSender(
 				congestion_meta1.DefaultClock{TimeFunc: timeFunc},
 				qcongestion.ByteCount(conn.Config().InitialPacketSize),
 				true,
-				nil,
 			)
 		}, nil
 	default:
