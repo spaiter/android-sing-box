@@ -5,7 +5,6 @@ package masque
 import (
 	"net/netip"
 	"sync"
-	"time"
 
 	"github.com/sagernet/gvisor/pkg/buffer"
 	"github.com/sagernet/gvisor/pkg/tcpip"
@@ -13,10 +12,7 @@ import (
 	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv4"
 	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv6"
 	"github.com/sagernet/gvisor/pkg/tcpip/stack"
-	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing-tun/ping"
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
@@ -110,23 +106,6 @@ func (w *systemStackDevice) Close() error {
 		err = w.systemDevice.Close()
 	})
 	return err
-}
-
-func (w *systemStackDevice) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	ctx := log.ContextWithNewID(w.options.Context)
-	destination, err := ping.ConnectGVisor(
-		ctx, w.options.Logger,
-		metadata.Source.Addr, metadata.Destination.Addr,
-		routeContext,
-		w.stack,
-		w.Inet4Address(), w.Inet6Address(),
-		timeout,
-	)
-	if err != nil {
-		return nil, err
-	}
-	w.options.Logger.InfoContext(ctx, "linked ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to ", metadata.Destination.AddrString())
-	return destination, nil
 }
 
 func (w *systemStackDevice) writeStack(packet []byte) bool {

@@ -5,7 +5,6 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/logger"
 	N "github.com/sagernet/sing/common/network"
@@ -16,7 +15,6 @@ type Device interface {
 	wgTun.Device
 	N.Dialer
 	Start() error
-	NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error)
 }
 
 type DeviceOptions struct {

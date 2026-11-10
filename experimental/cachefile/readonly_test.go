@@ -10,17 +10,18 @@ import (
 	"github.com/sagernet/bbolt"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
+	"github.com/sagernet/sing/common/logger"
 )
 
 // newStartedCache opens a read-write cache file at path, starts it and returns
 // the started instance. The caller is responsible for closing it.
 func newStartedCache(t *testing.T, path string) *CacheFile {
 	t.Helper()
-	cacheFile := New(context.Background(), option.CacheFileOptions{
+	cacheFile := New(context.Background(), logger.NOP(), option.CacheFileOptions{
 		Enabled: true,
 		Path:    path,
 	})
-	if err := cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	if err := cacheFile.Start(adapter.StartStateInitialize, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatalf("start rw cache: %v", err)
 	}
 	return cacheFile
@@ -39,15 +40,15 @@ func TestReadOnlyLoadsMASQUEConfig(t *testing.T) {
 	if err := writer.SaveMASQUEConfig(tag, masqueConfig); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.Close(); err != nil {
+	if err := closeCacheFile(writer); err != nil {
 		t.Fatal(err)
 	}
 
 	reader := NewReadOnly(context.Background(), path)
-	if err := reader.Start(adapter.StartStateInitialize); err != nil {
+	if err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatalf("start ro cache: %v", err)
 	}
-	defer reader.Close()
+	defer closeCacheFile(reader)
 
 	saved := reader.LoadMASQUEConfig(tag)
 	if saved == nil {
@@ -97,7 +98,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.Close(); err != nil {
+	if err := closeCacheFile(writer); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +115,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	rw := newStartedCache(t, rwPath)
-	if err := rw.Close(); err != nil {
+	if err := closeCacheFile(rw); err != nil {
 		t.Fatal(err)
 	}
 	if afterRW, _ := os.ReadFile(rwPath); string(afterRW) == string(dirty) {
@@ -123,13 +124,13 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 
 	// The actual fix: a read-only open must not touch the file at all.
 	reader := NewReadOnly(context.Background(), mainPath)
-	if err := reader.Start(adapter.StartStateInitialize); err != nil {
+	if err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatalf("start ro cache: %v", err)
 	}
 	if saved := reader.LoadMASQUEConfig(tag); saved == nil {
 		t.Fatal("missing MASQUE config from read-only cache")
 	}
-	if err := reader.Close(); err != nil {
+	if err := closeCacheFile(reader); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,7 +144,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 
 	// The unknown bucket must still be present, proving no housekeeping ran.
 	inspect := NewReadOnly(context.Background(), mainPath)
-	if err := inspect.Start(adapter.StartStateInitialize); err != nil {
+	if err := inspect.Start(adapter.StartStateInitialize, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatalf("start ro inspect cache: %v", err)
 	}
 	var unknownSeen bool
@@ -155,7 +156,7 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	inspect.Close()
+	closeCacheFile(inspect)
 	if !unknownSeen {
 		t.Fatal("read-only Start removed an unknown bucket; it must never run housekeeping")
 	}
@@ -166,11 +167,15 @@ func TestReadOnlyDoesNotMutateDatabase(t *testing.T) {
 func TestReadOnlyMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.db")
 	reader := NewReadOnly(context.Background(), path)
-	err := reader.Start(adapter.StartStateInitialize)
+	err := reader.Start(adapter.StartStateInitialize, adapter.NewScope(context.Background(), logger.NOP()))
 	if err == nil {
 		t.Fatal("expected an error for a missing cache file")
 	}
 	if !os.IsNotExist(err) {
 		t.Fatalf("expected os.ErrNotExist, got %v", err)
 	}
+}
+
+func closeCacheFile(c *CacheFile) error {
+	return c.database().Close()
 }

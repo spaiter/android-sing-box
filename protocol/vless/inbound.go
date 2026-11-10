@@ -49,6 +49,7 @@ type Inbound struct {
 	transport  adapter.V2RayServerTransport
 	decryption *encryption.ServerInstance
 	vision     bool
+	references []string
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSInboundOptions) (adapter.Inbound, error) {
@@ -67,7 +68,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if err != nil {
 		return nil, err
 	}
-	service := vless.NewService[int](logger, adapter.NewUpstreamContextHandlerEx(inbound.newConnectionEx, inbound.newPacketConnectionEx))
+	service := vless.NewService[int](logger, adapter.NewUpstreamContextHandler(inbound.newConnectionEx, inbound.newPacketConnectionEx))
 	service.UpdateUsers(common.MapIndexed(inbound.users, func(index int, _ option.VLESSUser) int {
 		return index
 	}), common.Map(inbound.users, func(it option.VLESSUser) string {
@@ -89,6 +90,9 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		})
 		if err != nil {
 			return nil, err
+		}
+		if options.TLS.Reality != nil && options.TLS.Reality.Enabled && options.TLS.Reality.Handshake.Detour != "" {
+			inbound.references = []string{options.TLS.Reality.Handshake.Detour}
 		}
 	}
 	if options.Transport != nil {
@@ -119,19 +123,30 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	return inbound, nil
 }
 
-func (h *Inbound) Start(stage adapter.StartStage) error {
+func (h *Inbound) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
+	if h.decryption != nil { //H
+		scope.Add(func() error { h.decryption.Close(); return nil }) //H
+	} //H
 	if h.tlsConfig != nil {
 		err := h.tlsConfig.Start()
 		if err != nil {
 			return err
 		}
+		scope.Add(h.tlsConfig.Close)
 	}
 	if h.transport == nil {
-		return h.listener.Start()
+		err := h.listener.Start()
+		if err != nil {
+			return err
+		}
+		scope.Add(h.listener.Close)
+		return nil
 	}
+	scope.Add(h.transport.Close)
+	scope.Add(h.listener.Close)
 	if common.Contains(h.transport.Network(), N.NetworkTCP) {
 		tcpListener, err := h.listener.ListenTCP()
 		if err != nil {
@@ -159,27 +174,15 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 	return nil
 }
 
-func (h *Inbound) Close() error {
-	if h.decryption != nil {
-		h.decryption.Close()
-	}
-	return common.Close(
-		h.service,
-		h.listener,
-		h.tlsConfig,
-		h.transport,
-	)
+func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	canSplice := h.transport == nil                                             //H
+	if canSplice && h.decryption != nil && h.decryption.IsFullRandomXorMode() { //H
+		canSplice = false //H
+	} //H
+	h.newConnectionExInternal(ctx, conn, metadata, onClose, canSplice) //H
 }
 
-func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
-	canSplice := h.transport == nil
-	if canSplice && h.decryption != nil && h.decryption.IsFullRandomXorMode() {
-		canSplice = false
-	}
-	h.newConnectionExInternal(ctx, conn, metadata, onClose, canSplice)
-}
-
-func (h *Inbound) newConnectionExInternal(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc, canSplice bool) {
+func (h *Inbound) newConnectionExInternal(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc, canSplice bool) { //H
 	if h.tlsConfig != nil && h.transport == nil {
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
 		if err != nil {
@@ -201,7 +204,7 @@ func (h *Inbound) newConnectionExInternal(ctx context.Context, conn net.Conn, me
 	}
 	var err error
 	if needsEnhancedVision(h.vision, h.decryption != nil, h.transport != nil) {
-		err = h.service.NewConnectionWithOptions(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose, canSplice)
+		err = h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
 	} else {
 		err = h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
 	}
@@ -349,5 +352,9 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
 	h.logger.InfoContext(ctx, "inbound connection from ", metadata.Source)
-	(*Inbound)(h).newConnectionExInternal(ctx, conn, metadata, onClose, false)
+	(*Inbound)(h).newConnectionExInternal(ctx, conn, metadata, onClose, false) //H
+}
+
+func (h *Inbound) References() []string {
+	return h.references
 }

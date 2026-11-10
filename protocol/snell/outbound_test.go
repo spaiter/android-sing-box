@@ -345,12 +345,12 @@ func (c *lazyPacketTestClient) Close() error { return nil }
 
 func TestInterfaceUpdated(t *testing.T) {
 	t.Run("legacy", func(t *testing.T) {
-		require.NotPanics(t, (&Outbound{}).InterfaceUpdated)
+		require.NotPanics(t, func() { (&Outbound{}).InterfaceUpdated(context.Background()) })
 	})
 	t.Run("client", func(t *testing.T) {
 		client := &lazyPacketTestClient{}
 		outbound := &Outbound{client: client}
-		outbound.InterfaceUpdated()
+		outbound.InterfaceUpdated(context.Background())
 		require.True(t, client.resetCalled)
 	})
 }

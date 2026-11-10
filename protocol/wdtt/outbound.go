@@ -95,7 +95,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	return o, nil
 }
 
-func (o *Outbound) Start(stage adapter.StartStage) error {
+func (o *Outbound) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	if stage == adapter.StartStatePostStart {
 		o.logger.Info("wdtt: bridge will start on the first connection (idle timeout ", o.tunnel.IdleTimeout(), ")")
 	}

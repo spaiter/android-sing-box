@@ -32,5 +32,5 @@ func (s *BoxService) ResetNetwork() {
 }
 
 func (s *BoxService) UpdateWIFIState() {
-	s.instance.Network().UpdateWIFIState()
+	s.instance.Network().UpdateWIFIState(s.ctx)
 }

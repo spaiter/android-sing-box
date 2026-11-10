@@ -22,7 +22,7 @@ func TestRouteAdvertisementRoundTrip(t *testing.T) {
 	encoded := orig.append(nil)
 
 	r := quicvarint.NewReader(bytes.NewReader(encoded))
-	typ, body, err := http3.ParseCapsule(r)
+	typ, body, err := http3.NewCapsuleParser(r).Next()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestAddressAssignRoundTrip(t *testing.T) {
 	encoded := orig.append(nil)
 
 	r := quicvarint.NewReader(bytes.NewReader(encoded))
-	typ, body, err := http3.ParseCapsule(r)
+	typ, body, err := http3.NewCapsuleParser(r).Next()
 	if err != nil {
 		t.Fatal(err)
 	}

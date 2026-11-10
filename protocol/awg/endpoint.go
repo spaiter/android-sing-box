@@ -171,7 +171,7 @@ func NewEndpoint(ctx context.Context, router adapter.Router, logger log.ContextL
 // the awg port) and applies them via Device.IpcUpdate. Deferring the resolution here
 // (instead of at NewEndpoint) is what avoids the "no VpnService for socket protect"
 // crash on cold-cache clients while keeping the peer as an auto-following FQDN.
-func (e *Endpoint) Start(stage adapter.StartStage) error {
+func (e *Endpoint) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	if err := e.Device.Start(stage); err != nil {
 		return err
 	}

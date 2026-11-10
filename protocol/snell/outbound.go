@@ -224,7 +224,7 @@ func (h *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 	return h.dialUDPOverTCP(ctx)
 }
 
-func (h *Outbound) InterfaceUpdated() {
+func (h *Outbound) InterfaceUpdated(_ context.Context) {
 	if h.client != nil {
 		h.client.Reset()
 	}

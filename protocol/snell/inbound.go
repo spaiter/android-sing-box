@@ -166,7 +166,7 @@ func newSnellV5Service(options snellv5.ServiceOptions, userList []int, keyList [
 	return service, nil
 }
 
-func (h *Inbound) Start(stage adapter.StartStage) error {
+func (h *Inbound) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
@@ -209,7 +209,7 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 	if destination.IsValid() {
 		metadata.Destination = destination
 	}
-	(*Inbound)(h).newConnection(ctx, conn, *metadata, onClose)
+	(*Inbound)(h).NewConnection(ctx, conn, *metadata, onClose)
 }
 
 func (h *inboundHandler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
@@ -224,10 +224,10 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	if destination.IsValid() {
 		metadata.Destination = destination
 	}
-	h.newPacketConnection(ctx, conn, *metadata, onClose)
+	h.NewPacketConnection(ctx, conn, *metadata, onClose)
 }
 
-func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
 	if len(h.users) > 0 {
@@ -249,7 +249,7 @@ func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata ada
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
 
-func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+func (h *Inbound) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
 	if len(h.users) > 0 {
@@ -311,7 +311,7 @@ type quicProxyInitParser interface {
 	ParseQUICProxyInit(data []byte) (*snellprotocol.QUICProxySession, []byte, error)
 }
 
-func (h *inboundPacketHandler) NewPacketEx(buffer *buf.Buffer, source M.Socksaddr) {
+func (h *inboundPacketHandler) NewPacket(buffer *buf.Buffer, source M.Socksaddr) {
 	defer buffer.Release()
 	data := buffer.Bytes()
 	if len(data) == 0 || h.udpNat == nil {

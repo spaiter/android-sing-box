@@ -20,10 +20,9 @@ func NewCongestionControl(name string, cwnd int, timeFunc func() time.Time) (fun
 	switch name {
 	case "", "bbr":
 		return func(conn *quic.Conn) qcongestion.CongestionControl {
-			return congestion_meta2.NewBbrSender(
-				congestion_meta2.DefaultClock{TimeFunc: timeFunc},
+			return congestion_meta2.NewBbrSenderWithProfile(
 				qcongestion.ByteCount(conn.Config().InitialPacketSize),
-				qcongestion.ByteCount(cwnd),
+				congestion_meta2.ProfileStandard,
 			)
 		}, nil
 	case "cubic":

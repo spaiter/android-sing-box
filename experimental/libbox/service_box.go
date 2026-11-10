@@ -18,7 +18,6 @@ type BoxService struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	instance     *box.Box
-	clashServer  adapter.ClashServer
 	pauseManager pause.Manager
 
 	iOSPauseFields
@@ -33,8 +32,7 @@ func NewService(configContent string, platformInterface PlatformInterface) (*Box
 	runtimeDebug.FreeOSMemory()
 	ctx, cancel := context.WithCancel(ctx)
 	platformWrapper := &platformInterfaceWrapper{
-		iif:       platformInterface,
-		useProcFS: platformInterface.UseProcFS(),
+		iif: platformInterface,
 	}
 	service.MustRegister[adapter.PlatformInterface](ctx, platformWrapper)
 	instance, err := box.New(box.Options{
@@ -51,7 +49,6 @@ func NewService(configContent string, platformInterface PlatformInterface) (*Box
 		cancel:       cancel,
 		instance:     instance,
 		pauseManager: service.FromContext[pause.Manager](ctx),
-		clashServer:  service.FromContext[adapter.ClashServer](ctx),
 	}, nil
 }
 

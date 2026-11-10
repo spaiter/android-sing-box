@@ -19,7 +19,6 @@ import (
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/transport/masque"
-	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -41,8 +40,6 @@ const (
 func RegisterOutbound(registry *outbound.Registry) {
 	outbound.Register[option.MASQUEOutboundOptions](registry, C.TypeMASQUE, NewOutbound)
 }
-
-var _ adapter.DirectRouteOutbound = (*Outbound)(nil)
 
 type Outbound struct {
 	outbound.Adapter
@@ -191,7 +188,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 			System: options.System,
 			Name:   options.Name,
 			CreateDialer: func(interfaceName string) N.Dialer {
-				return common.Must1(dialer.NewDefault(ctx, option.DialerOptions{BindInterface: interfaceName}))
+				return common.Must1(dialer.NewDefault(ctx, option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{BindInterface: interfaceName}}))
 			},
 			Dialer: outboundDialer,
 			Address: []netip.Prefix{
@@ -270,7 +267,7 @@ func resolveTransportOptions(options option.MASQUEOutboundOptions) (string, uint
 	return transport, mtu, fallbackTimeout, nil
 }
 
-func (w *Outbound) Start(stage adapter.StartStage) error {
+func (w *Outbound) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	if stage != adapter.StartStatePostStart {
 		return nil
 	}
@@ -358,13 +355,6 @@ func (w *Outbound) ListenPacket(ctx context.Context, destination M.Socksaddr) (n
 		return bufio.NewNATPacketConn(bufio.NewPacketConn(packetConn), M.SocksaddrFrom(destinationAddress, destination.Port), destination), nil
 	}
 	return packetConn, nil
-}
-
-func (w *Outbound) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	if err := w.isTunnelInitialized(w.ctx); err != nil {
-		return nil, err
-	}
-	return w.tunnel.NewDirectRouteConnection(metadata, routeContext, timeout)
 }
 
 func (w *Outbound) isTunnelInitialized(ctx context.Context) error {

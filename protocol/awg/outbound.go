@@ -132,7 +132,7 @@ func NewOutbound(ctx context.Context, router adapter.Router, logger log.ContextL
 	}, nil
 }
 
-func (o *Outbound) Start(stage adapter.StartStage) error {
+func (o *Outbound) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	return o.device.Start(stage)
 }
 
@@ -140,7 +140,7 @@ func (o *Outbound) Close() error {
 	return o.device.Close()
 }
 
-func (o *Outbound) InterfaceUpdated() {
+func (o *Outbound) InterfaceUpdated(_ context.Context) {
 	o.device.InterfaceUpdated()
 }
 

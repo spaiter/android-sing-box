@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing/service"
 
 	mDNS "github.com/miekg/dns"
+	"github.com/sagernet/sing/common/logger"
 )
 
 const testDNSType = "test-balancer-child"
@@ -65,7 +66,12 @@ func registerBalancerTestTransport(registry *dns.TransportRegistry, created map[
 	})
 }
 
-func (t *balancerTestTransport) Start(stage adapter.StartStage) error {
+func (t *balancerTestTransport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
+	response, err := t.Exchange(ctx, message)
+	callback(response, err)
+}
+
+func (t *balancerTestTransport) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	t.starts.Add(1)
 	return nil
 }
@@ -137,7 +143,7 @@ type balancerTestManager struct {
 	transports map[string]adapter.DNSTransport
 }
 
-func (m balancerTestManager) Start(stage adapter.StartStage) error {
+func (m balancerTestManager) Start(stage adapter.StartStage, _ *adapter.Scope) error {
 	return nil
 }
 
@@ -385,7 +391,7 @@ func TestBalancerLifecycleForwardsToChildren(t *testing.T) {
 			{Type: testDNSType, Tag: "second", Options: &balancerTestOptions{Name: "second"}},
 		},
 	})
-	if err := balancer.Start(adapter.StartStateStart); err != nil {
+	if err := balancer.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatal(err)
 	}
 	balancer.Reset()
@@ -439,7 +445,7 @@ func TestBalancerKeepsChildDependenciesLocal(t *testing.T) {
 	if len(balancer.Dependencies()) != 0 {
 		t.Fatalf("balancer dependencies = %v, want none", balancer.Dependencies())
 	}
-	if err := balancer.Start(adapter.StartStateStart); err != nil {
+	if err := balancer.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -472,7 +478,7 @@ func TestBalancerExposesOuterChildDependency(t *testing.T) {
 	if dependencies := balancer.Dependencies(); len(dependencies) != 1 || dependencies[0] != "outer" {
 		t.Fatalf("balancer dependencies = %v, want [outer]", dependencies)
 	}
-	if err = balancer.Start(adapter.StartStateStart); err != nil {
+	if err = balancer.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), logger.NOP())); err != nil {
 		t.Fatal(err)
 	}
 }

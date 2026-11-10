@@ -33,3 +33,8 @@ func ResetV2RayClientTransport(transport V2RayClientTransport) error {
 	}
 	return transport.Close()
 }
+
+type V2RayMultiplexClientTransport interface {
+	V2RayClientTransport
+	MultiplexEnabled() bool
+}

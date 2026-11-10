@@ -13,6 +13,7 @@ import (
 	snellprotocol "github.com/sagernet/sing-snell"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/stretchr/testify/require"
 )
@@ -120,7 +121,7 @@ func TestSnellInboundStartsQUICProxyListener(t *testing.T) {
 			require.NoError(t, err)
 			inbound := created.(*Inbound)
 			t.Cleanup(func() { require.NoError(t, inbound.Close()) })
-			require.NoError(t, inbound.Start(adapter.StartStateStart))
+			require.NoError(t, inbound.Start(adapter.StartStateStart, adapter.NewScope(context.Background(), logger.NOP())))
 			require.NotNil(t, inbound.listener.TCPListener())
 			require.NotNil(t, inbound.listener.UDPConn())
 		})
@@ -159,7 +160,7 @@ func TestQUICProxyAuthenticationDoesNotBlockUDPListener(t *testing.T) {
 	initPacket := buf.As([]byte{1})
 	returned := make(chan struct{})
 	go func() {
-		(*inboundPacketHandler)(inbound).NewPacketEx(initPacket, source)
+		(*inboundPacketHandler)(inbound).NewPacket(initPacket, source)
 		close(returned)
 	}()
 	select {
@@ -174,7 +175,7 @@ func TestQUICProxyAuthenticationDoesNotBlockUDPListener(t *testing.T) {
 	}
 
 	nextPacket := []byte{0xc0, 0, 0, 0, 1, 2, 3}
-	(*inboundPacketHandler)(inbound).NewPacketEx(buf.As(nextPacket), source)
+	(*inboundPacketHandler)(inbound).NewPacket(buf.As(nextPacket), source)
 	close(parser.release)
 
 	var event quicProxyNATTestEvent

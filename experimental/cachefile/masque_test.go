@@ -7,19 +7,21 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing/common/logger"
 	"github.com/sagernet/sing-box/option"
 )
 
 func TestMASQUEConfigUsesDedicatedBucket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.db")
-	cacheFile := New(context.Background(), option.CacheFileOptions{
+	cacheFile := New(context.Background(), logger.NOP(), option.CacheFileOptions{
 		Enabled: true,
 		Path:    path,
 	})
-	if err := cacheFile.Start(adapter.StartStateInitialize); err != nil {
+	scope := adapter.NewScope(context.Background(), logger.NOP())
+	if err := cacheFile.Start(adapter.StartStateInitialize, scope); err != nil {
 		t.Fatal(err)
 	}
-	defer cacheFile.Close()
+	defer scope.Close()
 
 	tag := "shared-tag"
 	masqueConfig := &adapter.SavedBinary{

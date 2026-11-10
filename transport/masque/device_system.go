@@ -8,13 +8,9 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/sagernet/sing-box/adapter"
-	"github.com/sagernet/sing-box/log"
 	tun "github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing-tun/ping"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
@@ -35,7 +31,6 @@ type systemDevice struct {
 	inet4Address   netip.Addr
 	inet6Address   netip.Addr
 	packetOutbound chan *buf.Buffer
-	rewriter       *ping.SourceRewriter
 	writeBufs      [][]byte
 }
 
@@ -66,7 +61,6 @@ func newSystemDevice(options DeviceOptions) (*systemDevice, error) {
 		inet4Address:   inet4Address,
 		inet6Address:   inet6Address,
 		packetOutbound: make(chan *buf.Buffer, 256),
-		rewriter:       ping.NewSourceRewriter(options.Context, options.Logger, inet4Address, inet6Address),
 	}, nil
 }
 
@@ -158,18 +152,7 @@ func (w *systemDevice) Read(bufs [][]byte, sizes []int, offset int) (count int, 
 
 func (w *systemDevice) Write(bufs [][]byte, offset int) (count int, err error) {
 	w.writeBufs = w.writeBufs[:0]
-	for _, packet := range bufs {
-		handled, writeErr := w.rewriter.WriteBack(packet[offset:])
-		if handled {
-			if writeErr != nil {
-				err = writeErr
-				return
-			}
-			count++
-		} else {
-			w.writeBufs = append(w.writeBufs, packet)
-		}
-	}
+	w.writeBufs = append(w.writeBufs, bufs...)
 	if len(w.writeBufs) == 0 {
 		return
 	}
@@ -222,39 +205,4 @@ func (w *systemDevice) BatchSize() int {
 		return w.batchDevice.BatchSize()
 	}
 	return 1
-}
-
-func (w *systemDevice) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	ctx := log.ContextWithNewID(w.options.Context)
-	session := tun.DirectRouteSession{
-		Source:      metadata.Source.Addr,
-		Destination: metadata.Destination.Addr,
-	}
-	w.rewriter.CreateSession(session, routeContext)
-	w.options.Logger.InfoContext(ctx, "linked ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to ", metadata.Destination.AddrString())
-	return &systemDirectRouteDestination{device: w, session: session}, nil
-}
-
-var _ tun.DirectRouteDestination = (*systemDirectRouteDestination)(nil)
-
-type systemDirectRouteDestination struct {
-	device  *systemDevice
-	session tun.DirectRouteSession
-	closed  atomic.Bool
-}
-
-func (d *systemDirectRouteDestination) WritePacket(packet *buf.Buffer) error {
-	d.device.rewriter.RewritePacket(packet.Bytes())
-	d.device.packetOutbound <- packet
-	return nil
-}
-
-func (d *systemDirectRouteDestination) Close() error {
-	d.closed.Store(true)
-	d.device.rewriter.DeleteSession(d.session)
-	return nil
-}
-
-func (d *systemDirectRouteDestination) IsClosed() bool {
-	return d.closed.Load()
 }

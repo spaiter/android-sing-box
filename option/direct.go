@@ -23,11 +23,11 @@ type Fragment struct {
 type _DirectOutboundOptions struct {
 	DialerOptions
 	// Deprecated: Use Route Action instead
-	OverrideAddress string `json:"override_address,omitempty"`
+	OverrideAddress string `json:"override_address,omitempty" schema:"omit"`
 	// Deprecated: Use Route Action instead
-	OverridePort uint16 `json:"override_port,omitempty"`
+	OverridePort uint16 `json:"override_port,omitempty" schema:"omit"`
 	// Deprecated: removed
-	ProxyProtocol uint8     `json:"proxy_protocol,omitempty"`
+	ProxyProtocol uint8     `json:"proxy_protocol,omitempty" schema:"omit"`
 	Fragment      *Fragment `json:"fragment,omitempty"`
 }
 

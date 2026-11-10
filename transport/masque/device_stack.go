@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/sagernet/gvisor/pkg/buffer"
 	"github.com/sagernet/gvisor/pkg/tcpip"
@@ -17,11 +16,9 @@ import (
 	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv4"
 	"github.com/sagernet/gvisor/pkg/tcpip/network/ipv6"
 	"github.com/sagernet/gvisor/pkg/tcpip/stack"
-	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/transport/wireguard"
 	"github.com/sagernet/sing-tun"
-	"github.com/sagernet/sing-tun/ping"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
@@ -242,23 +239,6 @@ func (w *stackDevice) Close() error {
 
 func (w *stackDevice) BatchSize() int {
 	return 1
-}
-
-func (w *stackDevice) NewDirectRouteConnection(metadata adapter.InboundContext, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	ctx := log.ContextWithNewID(w.ctx)
-	destination, err := ping.ConnectGVisor(
-		ctx, w.logger,
-		metadata.Source.Addr, metadata.Destination.Addr,
-		routeContext,
-		w.stack,
-		w.inet4Address, w.inet6Address,
-		timeout,
-	)
-	if err != nil {
-		return nil, err
-	}
-	w.logger.InfoContext(ctx, "linked ", metadata.Network, " connection from ", metadata.Source.AddrString(), " to ", metadata.Destination.AddrString())
-	return destination, nil
 }
 
 var _ stack.LinkEndpoint = (*wireEndpoint)(nil)

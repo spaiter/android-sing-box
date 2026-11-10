@@ -2,6 +2,7 @@ package boxapi
 
 import (
 	"context"
+	tun "github.com/sagernet/sing-tun"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -144,4 +145,8 @@ func (s *SbStatsService) loadOrCreateCounter(name string) *atomic.Int64 {
 	counter = &atomic.Int64{}
 	s.counters[name] = counter
 	return counter
+}
+
+func (s *SbStatsService) RoutedFlow(ctx context.Context, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) tun.FlowTracker {
+	return nil
 }

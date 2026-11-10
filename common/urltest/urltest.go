@@ -10,18 +10,18 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-mux"
+	"github.com/sagernet/sing/common"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/common/observable"
 )
 
-var _ adapter.URLTestHistoryStorage = (*HistoryStorage)(nil)
-
 type HistoryStorage struct {
 	access       sync.RWMutex
 	delayHistory map[string]*adapter.URLTestHistory
-	updateHook   *observable.Subscriber[struct{}]
+	updateHooks  []*observable.Subscriber[struct{}]
 }
 
 func NewHistoryStorage() *HistoryStorage {
@@ -30,8 +30,16 @@ func NewHistoryStorage() *HistoryStorage {
 	}
 }
 
-func (s *HistoryStorage) SetHook(hook *observable.Subscriber[struct{}]) {
-	s.updateHook = hook
+func (s *HistoryStorage) AddUpdateHook(hook *observable.Subscriber[struct{}]) {
+	s.access.Lock()
+	defer s.access.Unlock()
+	s.updateHooks = append(s.updateHooks, hook)
+}
+
+func (s *HistoryStorage) NotifyUpdated() {
+	s.access.RLock()
+	defer s.access.RUnlock()
+	s.notifyUpdated()
 }
 
 func (s *HistoryStorage) LoadURLTestHistory(tag string) *adapter.URLTestHistory {
@@ -58,8 +66,7 @@ func (s *HistoryStorage) StoreURLTestHistory(tag string, history *adapter.URLTes
 }
 
 func (s *HistoryStorage) notifyUpdated() {
-	updateHook := s.updateHook
-	if updateHook != nil {
+	for _, updateHook := range s.updateHooks {
 		updateHook.Emit(struct{}{})
 	}
 }
@@ -67,11 +74,25 @@ func (s *HistoryStorage) notifyUpdated() {
 func (s *HistoryStorage) Close() error {
 	s.access.Lock()
 	defer s.access.Unlock()
-	s.updateHook = nil
+	s.updateHooks = nil
 	return nil
 }
 
-func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err error) {
+func URLTest(ctx context.Context, link string, detour N.Dialer) (uint16, error) {
+	multiplexOutbound, isMultiplexOutbound := common.Cast[adapter.OutboundWithMultiplex](detour)
+	if isMultiplexOutbound && multiplexOutbound.MultiplexEnabled() {
+		warmContext := adapter.ContextWithKeepSession(ctx)
+		warmContext = mux.ContextWithKeepSession(warmContext)
+		warmContext = contextWithQUICKeepSession(warmContext)
+		_, err := urlTest(warmContext, link, detour)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return urlTest(ctx, link, detour)
+}
+
+func urlTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err error) {
 	if link == "" {
 		link = "https://www.gstatic.com/generate_204"
 	}
@@ -119,21 +140,16 @@ func URLTest(ctx context.Context, link string, detour N.Dialer) (t uint16, err e
 		// 45s (was C.TCPTimeout=15s): give slow censorship-bypass outbounds time to establish
 		// during the probe (WG-over-VK's VK-TURN bridge takes ~15-50s to come up; MASQUE-WG QUIC
 		// ~10s) so URLTest can pick them as an auto-fallback when the direct methods are blocked.
-		// This never slows the fast path — URLTest probes members concurrently and selects the
-		// lowest-latency one as results arrive; the long timeout only bounds how long it waits
-		// for the slow ones before excluding them.
-		Timeout: 45 * time.Second,
+		// This never slows the fast path: members are probed concurrently and the lowest latency
+		// wins as results arrive; the long timeout only bounds the wait for the slow ones. //H
+		Timeout: 45 * time.Second, //H
 	}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req.WithContext(ctx))
 	if err != nil {
 		return
 	}
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-	}()
+	resp.Body.Close()
 	t = uint16(time.Since(start) / time.Millisecond)
 	return
 }

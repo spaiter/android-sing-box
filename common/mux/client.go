@@ -66,11 +66,11 @@ type clientDialer struct {
 }
 
 func (d *clientDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
-	return d.Dialer.DialContext(adapter.OverrideContext(ctx), network, destination)
+	return d.Dialer.DialContext(adapter.ContextForMultiplexSession(ctx), network, destination)
 }
 
 func (d *clientDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
-	return d.Dialer.ListenPacket(adapter.OverrideContext(ctx), destination)
+	return d.Dialer.ListenPacket(adapter.ContextForMultiplexSession(ctx), destination)
 }
 
 // DialContext routes to the active multiplex implementation.
@@ -111,4 +111,16 @@ func (c *Client) Close() error {
 		return c.cool.Close()
 	}
 	return c.mux.Close()
+}
+
+func (c *Client) SetKeepIdleConnections(keep bool) {
+	if c.mux != nil {
+		c.mux.SetKeepIdleConnections(keep)
+	}
+}
+
+func (c *Client) CloseIdleConnections() {
+	if c.mux != nil {
+		c.mux.CloseIdleConnections()
+	}
 }
